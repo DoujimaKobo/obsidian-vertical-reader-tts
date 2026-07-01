@@ -71,6 +71,15 @@
     }
 
     const range = selection.getRangeAt(0);
+
+    // Only honor the caret when it is actually inside the vertical reader.
+    // Otherwise (caret in the main editor, in the sidebar chrome, or nowhere)
+    // the range math below produces a garbage offset — which is why the first
+    // Play could start from the last sentence. Fall back to the full content.
+    if (!verticalTextElement.contains(range.startContainer)) {
+      return content;
+    }
+
     const preCaretRange = range.cloneRange();
     preCaretRange.selectNodeContents(verticalTextElement);
     preCaretRange.setEnd(range.startContainer, range.startOffset);

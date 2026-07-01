@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf } from 'obsidian';
+import { ItemView, WorkspaceLeaf, MarkdownView } from 'obsidian';
 import VerticalReader from '../components/VerticalReader.svelte';
 import type { TTSEngine } from '../tts/TTSEngine';
 import type { HighlightManager } from '../tts/HighlightManager';
@@ -41,6 +41,21 @@ export class VerticalReaderView extends ItemView {
   }
 
   async onOpen() {
+    // Pull the currently active note's content immediately so the reader shows
+    // something the moment it opens, instead of waiting for the first sync event.
+    if (!this.currentContent) {
+      const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+      if (activeView?.editor) {
+        this.currentContent = activeView.editor.getValue();
+      }
+    }
+    this.mountComponent();
+  }
+
+  /**
+   * Mount (or re-mount) the Svelte component into the view container.
+   */
+  private mountComponent() {
     const container = this.containerEl.children[1];
     container.empty();
     container.addClass('vertical-reader-container');
@@ -56,6 +71,20 @@ export class VerticalReaderView extends ItemView {
         app: this.app
       }
     });
+  }
+
+  /**
+   * Rebuild the view so it picks up changed settings (e.g. a TTS engine
+   * switch). The component reads engine-dependent state at mount time, so a
+   * fresh mount is the simplest reliable way to reflect a settings change
+   * without requiring the user to close and reopen the view.
+   */
+  refresh() {
+    if (this.component) {
+      this.component.$destroy();
+      this.component = null;
+    }
+    this.mountComponent();
   }
 
   async onClose() {

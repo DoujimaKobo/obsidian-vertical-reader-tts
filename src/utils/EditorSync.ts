@@ -50,6 +50,12 @@ export class EditorSync {
       this.app.workspace.on('active-leaf-change', this.handleLeafChange.bind(this))
     );
 
+    // Listen to file opens (fires when a different note is opened in the same
+    // pane, which active-leaf-change may not catch)
+    this.eventRefs.push(
+      this.app.workspace.on('file-open', this.handleLeafChange.bind(this))
+    );
+
     // Listen to editor changes (also handles cursor position)
     this.eventRefs.push(
       this.app.workspace.on('editor-change', this.handleEditorChange.bind(this))

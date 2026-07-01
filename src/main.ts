@@ -259,6 +259,18 @@ export default class VerticalReaderPlugin extends Plugin {
   }
 
   /**
+   * Re-mount any open vertical reader views so they reflect the current
+   * settings (called after switching TTS engine, etc.).
+   */
+  refreshViews() {
+    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_VERTICAL_READER);
+    for (const leaf of leaves) {
+      const view = leaf.view as VerticalReaderView;
+      view.refresh?.();
+    }
+  }
+
+  /**
    * Activate the vertical reader view
    */
   async activateView() {

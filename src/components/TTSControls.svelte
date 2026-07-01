@@ -153,6 +153,9 @@
     ttsState.stop();
   }
 
+  // Fired continuously while dragging the slider: update the value/label and
+  // the engine rate, but do NOT restart playback (restarting on every tick is
+  // what made speed changes feel chaotic).
   function handleRateChange(event: Event) {
     const target = event.target as HTMLInputElement;
     playbackRate = parseFloat(target.value);
@@ -164,48 +167,36 @@
       const voicevoxEngine = ttsEngine.getVoicevoxEngine();
       if (voicevoxEngine) {
         voicevoxEngine.setSpeed(playbackRate);
-        console.log('VOICEVOX speed updated to:', playbackRate);
       }
-    }
-
-    // If currently playing, restart with new rate
-    if ($ttsState.isPlaying && !$ttsState.isPaused) {
-      // Stop current speech and wait before restarting
-      ttsEngine.stop();
-      const timeoutId = window.setTimeout(() => {
-        timeoutIds = timeoutIds.filter(id => id !== timeoutId);
-        handlePlay();
-      }, 150);
-      timeoutIds.push(timeoutId);
     }
   }
 
-  function handleVoiceChange(event: Event) {
-    const target = event.target as HTMLSelectElement;
+  // Fired once when the slider is released: apply the new rate to the current
+  // playback with a single restart (Web Speech / VOICEVOX can't change rate of
+  // an in-flight utterance, so a restart is unavoidable — but only one).
+  function handleRateCommit() {
+    // handlePlay() stops cleanly before restarting, so one call is enough.
+    if ($ttsState.isPlaying && !$ttsState.isPaused) {
+      handlePlay();
+    }
+  }
 
+  function handleVoiceChange() {
+    // selectedVoiceIndex / selectedVoicevoxSpeakerId are kept in sync via
+    // bind:value, so we just apply them here.
     if (isVoicevoxMode) {
-      // VOICEVOX speaker change
-      selectedVoicevoxSpeakerId = parseInt(target.value);
       const voicevoxEngine = ttsEngine.getVoicevoxEngine();
       if (voicevoxEngine) {
         voicevoxEngine.setSpeaker(selectedVoicevoxSpeakerId);
       }
-    } else {
-      // Web Speech API voice change
-      selectedVoiceIndex = parseInt(target.value);
-      if (selectedVoiceIndex >= 0 && selectedVoiceIndex < voices.length) {
-        ttsEngine.setVoice(voices[selectedVoiceIndex]);
-      }
+    } else if (selectedVoiceIndex >= 0 && selectedVoiceIndex < voices.length) {
+      ttsEngine.setVoice(voices[selectedVoiceIndex]);
     }
 
-    // If currently playing, restart with new voice/speaker
+    // If currently playing, restart once with the new voice/speaker.
+    // handlePlay() already stops cleanly first, so no extra stop here.
     if ($ttsState.isPlaying) {
-      ttsEngine.stop();
-      const timeoutId = window.setTimeout(() => {
-        timeoutIds = timeoutIds.filter(id => id !== timeoutId);
-        handlePlay();
-      }, 150);
-      timeoutIds.push(timeoutId);
+      handlePlay();
     }
   }
 
@@ -225,171 +216,179 @@
 </script>
 
 <div class="tts-controls">
-  <button
-    class="tts-button"
-    on:click={handlePlay}
-    disabled={$ttsState.isPlaying}
-    aria-label="Play"
-  >
-    ▶ Play
-  </button>
-
-  {#if $ttsState.isPlaying}
-    {#if $ttsState.isPaused}
-      <button class="tts-button" on:click={handleResume} aria-label="Resume">
-        ▶ Resume
+  <!-- Transport row: fixed order, its own line so nothing else shifts -->
+  <div class="tts-row tts-transport">
+    {#if !$ttsState.isPlaying}
+      <button class="tts-button mod-cta" on:click={handlePlay} aria-label="Play">
+        ▶ 再生
       </button>
     {:else}
-      <button class="tts-button" on:click={handlePause} aria-label="Pause">
-        ⏸ Pause
+      {#if $ttsState.isPaused}
+        <button class="tts-button" on:click={handleResume} aria-label="Resume">▶ 再開</button>
+      {:else}
+        <button class="tts-button" on:click={handlePause} aria-label="Pause">⏸ 一時停止</button>
+      {/if}
+      <button class="tts-button" on:click={handleStop} aria-label="Stop">⏹ 停止</button>
+      <button class="tts-button" on:click={handleJumpToReading} aria-label="Jump to reading position">
+        📍 現在位置
       </button>
     {/if}
-    <button class="tts-button" on:click={handleStop} aria-label="Stop">
-      ⏹ Stop
-    </button>
-  {/if}
+  </div>
 
-  <label class="tts-rate-control">
-    <span>Speed: {playbackRate.toFixed(1)}x</span>
+  <!-- Speed row -->
+  <div class="tts-row">
+    <span class="tts-label">速度</span>
     <input
+      class="tts-slider"
       type="range"
       min="0.5"
       max="3.0"
       step="0.1"
       value={playbackRate}
       on:input={handleRateChange}
+      on:change={handleRateCommit}
       aria-label="Playback speed"
     />
-  </label>
+    <span class="tts-value">{playbackRate.toFixed(1)}x</span>
+  </div>
 
-  {#if isVoicevoxMode}
-    {#if voicevoxSpeakers.length > 0}
-      <label class="tts-voice-control">
-        <span>Voice (VOICEVOX):</span>
+  <!-- Voice row: alone on its line, so its width never shoves other controls -->
+  <div class="tts-row">
+    <span class="tts-label">音声</span>
+    {#if isVoicevoxMode}
+      {#if voicevoxSpeakers.length > 0}
         <select
-          class="tts-voice-select"
-          value={selectedVoicevoxSpeakerId}
+          class="tts-select"
+          bind:value={selectedVoicevoxSpeakerId}
           on:change={handleVoiceChange}
           aria-label="VOICEVOX Speaker selection"
         >
           {#each voicevoxSpeakers as speaker}
-            <option value={speaker.id}>
-              {speaker.name}
-            </option>
+            <option value={speaker.id}>{speaker.name}</option>
           {/each}
         </select>
-      </label>
-    {:else}
-      <button class="tts-button" on:click={loadVoicevoxSpeakers}>
-        🔄 Load VOICEVOX Speakers
-      </button>
-    {/if}
-  {:else if voices.length > 0}
-    <label class="tts-voice-control">
-      <span>Voice:</span>
+      {:else}
+        <button class="tts-button" on:click={loadVoicevoxSpeakers}>🔄 話者を読み込む</button>
+      {/if}
+    {:else if voices.length > 0}
       <select
-        class="tts-voice-select"
-        value={selectedVoiceIndex}
+        class="tts-select"
+        bind:value={selectedVoiceIndex}
         on:change={handleVoiceChange}
         aria-label="Voice selection"
       >
         {#each voices as voice, i}
-          <option value={i}>
-            {voice.name} ({voice.lang})
-          </option>
+          <option value={i}>{voice.name} ({voice.lang})</option>
         {/each}
       </select>
+    {:else}
+      <span class="tts-value">利用可能な音声がありません</span>
+    {/if}
+  </div>
+
+  <!-- Options row -->
+  <div class="tts-row">
+    <label class="tts-auto-scroll">
+      <input
+        type="checkbox"
+        checked={autoScroll}
+        on:change={handleAutoScrollChange}
+        aria-label="Auto-scroll"
+      />
+      <span>自動スクロール</span>
     </label>
-  {/if}
-
-  <label class="tts-auto-scroll">
-    <input
-      type="checkbox"
-      checked={autoScroll}
-      on:change={handleAutoScrollChange}
-      aria-label="Auto-scroll"
-    />
-    <span>自動スクロール</span>
-  </label>
-
-  {#if $ttsState.isPlaying}
-    <button
-      class="tts-button"
-      on:click={handleJumpToReading}
-      aria-label="Jump to reading position"
-    >
-      📍 位置へ移動
-    </button>
-  {/if}
+  </div>
 </div>
 
 <style>
   .tts-controls {
     display: flex;
-    gap: 10px;
-    align-items: center;
-    padding: 10px;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
     border-bottom: 1px solid var(--background-modifier-border);
-    background-color: var(--background-primary);
-    flex-wrap: wrap;
+    background-color: var(--background-secondary);
+  }
+
+  .tts-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    min-height: 30px;
+  }
+
+  .tts-transport {
+    gap: 6px;
+  }
+
+  .tts-label {
+    flex: 0 0 2.5em;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .tts-value {
+    font-size: 12px;
+    color: var(--text-muted);
+    min-width: 2.5em;
   }
 
   .tts-button {
-    padding: 6px 12px;
+    padding: 5px 12px;
     cursor: pointer;
     border: 1px solid var(--background-modifier-border);
     background-color: var(--interactive-normal);
     color: var(--text-normal);
-    border-radius: 4px;
-    font-size: 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    white-space: nowrap;
   }
 
   .tts-button:hover:not(:disabled) {
     background-color: var(--interactive-hover);
   }
 
-  .tts-button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+  .tts-button.mod-cta {
+    background-color: var(--interactive-accent);
+    color: var(--text-on-accent);
+    border-color: var(--interactive-accent);
   }
 
-  .tts-rate-control {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    font-size: 14px;
+  .tts-button.mod-cta:hover {
+    background-color: var(--interactive-accent-hover);
   }
 
-  .tts-rate-control input[type="range"] {
-    width: 100px;
+  .tts-slider {
+    flex: 1 1 auto;
+    min-width: 80px;
   }
 
-  .tts-voice-control {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    font-size: 14px;
-  }
-
-  .tts-voice-select {
+  .tts-select {
+    flex: 1 1 auto;
+    min-width: 0;
     padding: 4px 8px;
     border: 1px solid var(--background-modifier-border);
     background-color: var(--background-primary);
     color: var(--text-normal);
-    border-radius: 4px;
+    border-radius: 6px;
     cursor: pointer;
-    max-width: 200px;
   }
 
-  .tts-voice-select:hover {
-    background-color: var(--background-secondary);
+  .tts-select:hover {
+    background-color: var(--background-modifier-hover);
+  }
+
+  /* Keep the native dropdown list readable in dark themes */
+  .tts-select option {
+    background-color: var(--background-primary);
+    color: var(--text-normal);
   }
 
   .tts-auto-scroll {
     display: flex;
     gap: 6px;
     align-items: center;
-    font-size: 14px;
+    font-size: 13px;
     cursor: pointer;
     user-select: none;
   }

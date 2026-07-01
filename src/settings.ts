@@ -102,6 +102,9 @@ export class VerticalReaderSettingTab extends PluginSettingTab {
           // Reinitialize VOICEVOX Engine to match the new selection
           await this.plugin.reinitializeVoicevox();
 
+          // Re-mount open reader views so the switch takes effect immediately
+          this.plugin.refreshViews();
+
           // Refresh display to show/hide VOICEVOX settings
           this.display();
         }));

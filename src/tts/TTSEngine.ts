@@ -95,6 +95,11 @@ export class TTSEngine {
         console.error('Speech synthesis error:', event.error);
       });
 
+      // Chromium/Electron can leave speechSynthesis in a paused/stuck state
+      // after cancel(), which makes the next utterance silent. Kick it.
+      if (this.synth.paused) {
+        this.synth.resume();
+      }
       this.synth.speak(this.utterance);
 
     } finally {

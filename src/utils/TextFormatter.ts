@@ -89,8 +89,10 @@ export class TextFormatter {
 
     let result = content;
 
-    // Replace ？ or ！ followed by half-width space with full-width space
-    result = result.replace(/([？！])\s+/g, '$1　');
+    // Replace ？ or ！ followed by half-width space(s)/tab(s) with a full-width
+    // space. IMPORTANT: use [ \t] (not \s) so existing line breaks after ？！
+    // are preserved — \s would match \n and eat the newline.
+    result = result.replace(/([？！])[ \t]+/g, '$1　');
 
     // Add full-width space after ？ or ！ if not already present
     // Don't add if followed by:
