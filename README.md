@@ -110,6 +110,21 @@ vertical-reader-tts/
 
 ## Installation
 
+### Via BRAT (recommended for beta)
+
+You can install and auto-update this plugin with
+[BRAT](https://github.com/TfTHacker/obsidian42-brat) before it lands in the
+community store:
+
+1. Install **BRAT** from Community Plugins and enable it.
+2. Command palette → **BRAT: Add a beta plugin for testing**.
+3. Enter this repository URL: `https://github.com/DoujimaKobo/obsidian-vertical-reader-tts`
+4. BRAT installs the latest release. Enable **Vertical Reader with TTS** in
+   Community Plugins.
+
+BRAT keeps it updated whenever a new GitHub release is published. Works on both
+desktop and Android.
+
 ### Development Setup
 
 1. Install dependencies:

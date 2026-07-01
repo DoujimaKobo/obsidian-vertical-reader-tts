@@ -38,5 +38,5 @@ jobs:
         run: |
           gh release create "$TAG" \
             --title="$TAG" \
-            --draft \
+            --notes "Release $TAG" \
             main.js manifest.json styles.css
