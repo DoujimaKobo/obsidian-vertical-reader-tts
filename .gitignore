@@ -1,0 +1,17 @@
+node_modules
+main.js
+main.js.map
+*.map
+.DS_Store
+
+# Development/reference folders
+obsidian-sample-plugin-master/
+rollup-plugin-svelte-master/
+reference/
+
+# IDE
+.vscode/
+.idea/
+
+# Test files
+test-*.md

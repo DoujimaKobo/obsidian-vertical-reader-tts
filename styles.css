@@ -1,0 +1,153 @@
+/* Vertical Reader Plugin Styles */
+
+/* Main container */
+.vertical-reader-container {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Vertical text display */
+.vertical-text-container {
+  flex: 1;
+  overflow: auto;
+  background-color: var(--background-primary);
+}
+
+.vertical-text {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  height: 100%;
+  padding: 20px;
+  line-height: 2.5em;
+  font-size: 18px;
+  color: var(--text-normal);
+  font-family: var(--font-text);
+}
+
+/* Ruby text styling */
+ruby {
+  ruby-position: over;
+}
+
+rt {
+  font-size: 0.6em;
+  opacity: 0.8;
+  color: var(--text-muted);
+}
+
+/* Vertical mode ruby adjustments */
+.vertical-text ruby {
+  ruby-position: over;
+}
+
+/* Highlighting for TTS sync */
+ruby.highlighted,
+span.highlighted {
+  background-color: rgba(255, 255, 0, 0.4);
+  font-weight: 600;
+  transition: background-color 0.2s ease;
+}
+
+/* TTS Controls styling */
+.tts-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  flex-wrap: wrap;
+}
+
+.tts-button {
+  padding: 6px 12px;
+  cursor: pointer;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--interactive-normal);
+  color: var(--text-normal);
+  border-radius: 4px;
+  font-size: 14px;
+  transition: background-color 0.1s ease;
+}
+
+.tts-button:hover:not(:disabled) {
+  background-color: var(--interactive-hover);
+}
+
+.tts-button:active:not(:disabled) {
+  background-color: var(--interactive-accent);
+}
+
+.tts-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.tts-rate-control {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 14px;
+  color: var(--text-normal);
+}
+
+.tts-rate-control input[type="range"] {
+  width: 100px;
+  cursor: pointer;
+}
+
+/* Smooth scrolling */
+.vertical-text-container {
+  scroll-behavior: smooth;
+}
+
+/* Scrollbar styling for vertical text */
+.vertical-text-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+.vertical-text-container::-webkit-scrollbar-track {
+  background: var(--background-secondary);
+}
+
+.vertical-text-container::-webkit-scrollbar-thumb {
+  background: var(--background-modifier-border);
+  border-radius: 4px;
+}
+
+.vertical-text-container::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .vertical-text {
+    font-size: 16px;
+    padding: 15px;
+    line-height: 2.2em;
+  }
+
+  .tts-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .tts-button {
+    width: 100%;
+  }
+}
+
+/* Dark mode adjustments */
+.theme-dark ruby.highlighted,
+.theme-dark span.highlighted {
+  background-color: rgba(255, 255, 0, 0.3);
+}
+
+/* Light mode adjustments */
+.theme-light ruby.highlighted,
+.theme-light span.highlighted {
+  background-color: rgba(255, 255, 0, 0.5);
+}
