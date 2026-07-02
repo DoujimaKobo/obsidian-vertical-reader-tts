@@ -48,6 +48,7 @@ export class VOICEVOXEngine {
   // 現在の再生位置情報（同期スクロール用）
   private currentChunkIndex: number = 0;
   private totalChunks: number = 0;
+  private currentChunks: string[] = []; // 一時停止からの再開用に全チャンクを保持
   private currentChunkText: string = '';
   private currentChunkStartTime: number = 0; // 現在のチャンク開始時刻（performance.now()）
   private currentChunkDuration: number = 0; // 現在のチャンクの長さ（秒）
@@ -184,7 +185,8 @@ export class VOICEVOXEngine {
       const chunks = this.splitText(cleanText);
       console.log(`[Seamless Prefetch] Text split into ${chunks.length} chunks`);
 
-      // 再生位置情報を初期化
+      // 再生位置情報を初期化（resume用にチャンクを保持）
+      this.currentChunks = chunks;
       this.totalChunks = chunks.length;
       this.currentChunkIndex = 0;
 
@@ -198,10 +200,18 @@ export class VOICEVOXEngine {
       // シームレス・プリフェッチで順次再生
       await this.speakChunksSeamlessly(chunks);
 
-      // すべて完了: ステータス消去とフラグリセット
+      // 一時停止で抜けた場合は状態を保持して再開に備える
+      if (this.isPausedState) {
+        return;
+      }
+
+      // すべて完了: ステータス消去とフラグリセット、終了通知
       this.hideStatusNotice();
       this.isSpeakingState = false;
       this.isPausedState = false;
+      if (this.onEndCallback) {
+        this.onEndCallback();
+      }
 
     } catch (error) {
       console.error('VOICEVOX speech error:', error);
@@ -230,37 +240,37 @@ export class VOICEVOXEngine {
    * シームレス・プリフェッチで複数チャンクを途切れなく再生
    * 二段構え: 現在再生中 + 次を裏で準備
    */
-  private async speakChunksSeamlessly(chunks: string[]): Promise<void> {
+  private async speakChunksSeamlessly(chunks: string[], startIndex: number = 0): Promise<void> {
     if (chunks.length === 0) return;
 
-    console.log('[Seamless Prefetch] Starting seamless playback');
+    console.log(`[Seamless Prefetch] Starting seamless playback from chunk ${startIndex + 1}`);
 
     // キャンセルフラグをリセット
     this.shouldCancelPrefetch = false;
 
     try {
-      // 最初のチャンクを生成
-      this.showStatusNotice('🎵 音声を生成中... (1/' + chunks.length + ')');
-      const firstBuffer = await this.generateAudioBuffer(chunks[0]);
+      // 最初のチャンク（開始位置）を生成
+      this.showStatusNotice(`🎵 音声を生成中... (${startIndex + 1}/${chunks.length})`);
+      const firstBuffer = await this.generateAudioBuffer(chunks[startIndex]);
 
-      // キャンセルチェック
-      if (this.shouldCancelPrefetch) {
-        console.log('[Seamless Prefetch] Cancelled before first playback');
+      // キャンセル/一時停止チェック
+      if (this.shouldCancelPrefetch || this.isPausedState) {
+        console.log('[Seamless Prefetch] Halted before first playback');
         return;
       }
 
       // 最初のチャンクを再生開始
-      this.currentChunkIndex = 0;
-      this.currentChunkText = chunks[0];
-      this.currentChunkLength = chunks[0].length;
-      this.updateStatusNotice('▶️ 再生中... (1/' + chunks.length + ')');
+      this.currentChunkIndex = startIndex;
+      this.currentChunkText = chunks[startIndex];
+      this.currentChunkLength = chunks[startIndex].length;
+      this.updateStatusNotice(`▶️ 再生中... (${startIndex + 1}/${chunks.length})`);
       this.playAudioBuffer(firstBuffer);
 
       // 2番目以降のチャンクをプリフェッチ＆再生
-      for (let i = 1; i < chunks.length; i++) {
-        // キャンセルチェック（ループの最初に必ずチェック）
-        if (this.shouldCancelPrefetch) {
-          console.log(`[Seamless Prefetch] Loop cancelled at chunk ${i}`);
+      for (let i = startIndex + 1; i < chunks.length; i++) {
+        // キャンセル/一時停止チェック（ループの最初に必ずチェック）
+        if (this.shouldCancelPrefetch || this.isPausedState) {
+          console.log(`[Seamless Prefetch] Halted at chunk ${i}`);
           return;
         }
 
@@ -268,12 +278,12 @@ export class VOICEVOXEngine {
         console.log(`[Seamless Prefetch] Prefetching chunk ${i + 1}/${chunks.length}`);
         const prefetchPromise = this.prefetchNextChunk(chunks[i], i + 1, chunks.length);
 
-        // 現在のチャンクの再生完了を待つ
+        // 現在のチャンクの再生完了を待つ（一時停止時もここで解決される）
         await this.waitForCurrentPlaybackToComplete();
 
-        // キャンセルチェック（再生完了後）
-        if (this.shouldCancelPrefetch) {
-          console.log(`[Seamless Prefetch] Cancelled after playback completion ${i}`);
+        // キャンセル/一時停止チェック（再生完了後）
+        if (this.shouldCancelPrefetch || this.isPausedState) {
+          console.log(`[Seamless Prefetch] Halted after playback completion ${i}`);
           return;
         }
 
@@ -282,17 +292,17 @@ export class VOICEVOXEngine {
         try {
           nextBuffer = await prefetchPromise;
         } catch (error) {
-          // プリフェッチがキャンセルされた場合
-          if (this.shouldCancelPrefetch) {
-            console.log(`[Seamless Prefetch] Prefetch cancelled ${i}`);
+          // プリフェッチがキャンセル/一時停止された場合
+          if (this.shouldCancelPrefetch || this.isPausedState) {
+            console.log(`[Seamless Prefetch] Prefetch halted ${i}`);
             return;
           }
           throw error;
         }
 
-        // キャンセルチェック（プリフェッチ完了後、再生前に必ずチェック）
-        if (this.shouldCancelPrefetch) {
-          console.log(`[Seamless Prefetch] Cancelled before playing chunk ${i + 1}`);
+        // キャンセル/一時停止チェック（プリフェッチ完了後、再生前に必ずチェック）
+        if (this.shouldCancelPrefetch || this.isPausedState) {
+          console.log(`[Seamless Prefetch] Halted before playing chunk ${i + 1}`);
           return;
         }
 
@@ -308,9 +318,9 @@ export class VOICEVOXEngine {
         this.nextAudioBuffer = null;
       }
 
-      // キャンセルチェック（最後のチャンク再生前）
-      if (this.shouldCancelPrefetch) {
-        console.log('[Seamless Prefetch] Cancelled before waiting for last chunk');
+      // キャンセル/一時停止チェック（最後のチャンク再生前）
+      if (this.shouldCancelPrefetch || this.isPausedState) {
+        console.log('[Seamless Prefetch] Halted before waiting for last chunk');
         return;
       }
 
@@ -657,23 +667,73 @@ export class VOICEVOXEngine {
   }
 
   /**
-   * Pause playback (Note: Web Audio API doesn't support pause, so this stops playback)
+   * Pause playback.
+   *
+   * Web Audio can't truly pause a source, so we stop the current chunk and set
+   * `isPausedState`. The seamless loop checks `isPausedState` right after the
+   * (now-resolved) playback wait and returns WITHOUT advancing — remembering
+   * `currentChunkIndex`. Resume re-synthesizes from that chunk.
+   *
+   * This is the fix for the old bug where pausing stopped the audio source,
+   * which the loop mistook for a natural end and skipped ahead to keep playing.
    */
   pause() {
-    if (this.currentAudioSource && this.isSpeakingState) {
-      this.currentAudioSource.stop();
-      this.isPausedState = true;
-      this.isSpeakingState = false;
+    if (!this.isSpeakingState) return;
+
+    this.isPausedState = true;
+    this.isSpeakingState = false;
+
+    // Abandon the in-flight prefetch (its buffer will be discarded)
+    if (this.prefetchAbortController) {
+      this.prefetchAbortController.abort();
+      this.prefetchAbortController = null;
     }
+
+    // Stop the current chunk. onended resolves the playback wait; the loop then
+    // sees isPausedState and halts at currentChunkIndex.
+    if (this.currentAudioSource) {
+      try {
+        this.currentAudioSource.stop();
+        this.currentAudioSource.disconnect();
+      } catch (e) {
+        // already stopped
+      }
+      this.currentAudioSource = null;
+    }
+
+    this.updateStatusNotice('⏸ 一時停止中');
   }
 
   /**
-   * Resume playback (Note: Not supported with current implementation)
+   * Resume playback from the chunk where we paused.
    */
-  resume() {
-    // Web Audio API doesn't support pause/resume without additional complexity
-    // This would require tracking playback position and re-synthesizing
-    console.warn('Resume is not supported with VOICEVOX Engine');
+  async resume() {
+    if (!this.isPausedState || this.currentChunks.length === 0) return;
+    if (this.isProcessing) return;
+
+    this.isProcessing = true;
+    this.isPausedState = false;
+    this.isSpeakingState = true;
+
+    try {
+      this.mainAbortController = new AbortController();
+      await this.speakChunksSeamlessly(this.currentChunks, this.currentChunkIndex);
+
+      // Paused again mid-resume: keep state for the next resume
+      if (this.isPausedState) return;
+
+      this.hideStatusNotice();
+      this.isSpeakingState = false;
+      if (this.onEndCallback) {
+        this.onEndCallback();
+      }
+    } catch (error) {
+      console.error('VOICEVOX resume error:', error);
+      this.isSpeakingState = false;
+      this.hideStatusNotice();
+    } finally {
+      this.isProcessing = false;
+    }
   }
 
   /**
