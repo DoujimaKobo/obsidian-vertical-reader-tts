@@ -178,7 +178,11 @@
 
   // Scroll check function for VOICEVOX - 要素を直接指定
   function checkVoicevoxScroll() {
-    if (!$ttsState.isPlaying || settings.ttsEngine !== 'voicevox' || !verticalTextElement) {
+    // Only scroll when actively playing (not paused), auto-scroll is on, and
+    // VOICEVOX is the engine. isPaused must be checked here because pausing
+    // leaves isPlaying=true — without this the view kept scrolling while paused.
+    if (!$ttsState.isPlaying || $ttsState.isPaused || !$ttsState.autoScroll
+        || settings.ttsEngine !== 'voicevox' || !verticalTextElement) {
       return;
     }
 
@@ -233,9 +237,10 @@
     }
   }
 
-  // Web Speech API scroll (character-based)
+  // Web Speech API scroll (character-based). Gated on autoScroll + not paused.
   $: {
-    if ($ttsState.isPlaying && settings.ttsEngine !== 'voicevox' && $ttsState.currentCharIndex !== lastScrolledIndex) {
+    if ($ttsState.isPlaying && !$ttsState.isPaused && $ttsState.autoScroll
+        && settings.ttsEngine !== 'voicevox' && $ttsState.currentCharIndex !== lastScrolledIndex) {
       lastScrolledIndex = $ttsState.currentCharIndex;
       scrollToReading();
     }

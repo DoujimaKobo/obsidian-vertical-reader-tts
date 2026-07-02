@@ -18,6 +18,10 @@ export interface TTSStateData {
   playbackRate: number;
   currentCharIndex: number;
   currentCharLength: number;
+  // Shared UI state: whether the view should follow the reading position.
+  // Lives in the store so both TTSControls (checkbox) and VerticalReader
+  // (scroll logic) see the same value.
+  autoScroll: boolean;
 }
 
 /**

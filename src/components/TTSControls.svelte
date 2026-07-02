@@ -27,8 +27,11 @@
   let playbackRate = settings?.defaultRate || 1.0;
   let voices: SpeechSynthesisVoice[] = [];
   let selectedVoiceIndex: number = -1;
-  let autoScroll = false;
   let timeoutIds: number[] = [];
+
+  // Guard against rapid Play presses: true from the moment a start is
+  // requested until speak() has actually been kicked off.
+  let isStarting = false;
 
   // VOICEVOX support
   let voicevoxSpeakers: Array<{id: number, name: string}> = [];
@@ -119,14 +122,27 @@
   }
 
   function handlePlay() {
+    // Rapid-press guard: while a start is pending (the 100ms window below),
+    // additional presses are ignored. Combined with the Play button being
+    // disabled as soon as isPlaying flips, N rapid clicks collapse to exactly
+    // one playback. Without this, each click scheduled its own stop+speak and
+    // the racing stop() calls cancelled ALL of them (silence, UI stuck).
+    if (isStarting) return;
+    isStarting = true;
+
     try {
       // Stop any existing speech first
       ttsEngine.stop();
+
+      // Flip UI to playing immediately so the Play button disables now,
+      // not 100ms from now.
+      ttsState.play();
 
       // Small delay to ensure clean stop before starting new speech
       const timeoutId = window.setTimeout(() => {
         // Remove this timeout from tracking array
         timeoutIds = timeoutIds.filter(id => id !== timeoutId);
+        isStarting = false;
 
         // Get text from cursor position in vertical reader
         let textToSpeak = getTextFromCursor();
@@ -138,16 +154,18 @@
 
         if (!textToSpeak || !textToSpeak.trim()) {
           new Notice('読み上げるテキストがありません');
+          ttsState.stop();
           return;
         }
 
         ttsEngine.speak(textToSpeak, playbackRate, settings?.defaultLang || 'ja-JP');
-        ttsState.play();
       }, 100);
       timeoutIds.push(timeoutId);
     } catch (error) {
       console.error('Failed to start TTS:', error);
       new Notice('音声の再生に失敗しました');
+      isStarting = false;
+      ttsState.stop();
     }
   }
 
@@ -215,17 +233,16 @@
 
   function handleAutoScrollChange(event: Event) {
     const target = event.target as HTMLInputElement;
-    autoScroll = target.checked;
+    // Store-backed so VerticalReader's scroll logic sees the same value.
+    ttsState.setAutoScroll(target.checked);
   }
 
   function handleJumpToReading() {
     scrollToReading();
   }
 
-  // Watch for reading position changes and auto-scroll if enabled
-  $: if (autoScroll && $ttsState.isPlaying && $ttsState.currentCharIndex >= 0) {
-    scrollToReading();
-  }
+  // NOTE: auto-scroll itself is handled centrally in VerticalReader.svelte
+  // (gated on $ttsState.autoScroll / isPaused) — no duplicate scroll here.
 </script>
 
 <div class="tts-controls">
@@ -243,23 +260,35 @@
     </select>
   </div>
 
-  <!-- Transport row: fixed order, its own line so nothing else shifts -->
+  <!-- Transport row. ALL buttons are always rendered and merely enabled/
+       disabled by state, so their on-screen positions never change. This makes
+       rapid clicks land on the same physical button every time (the pressed
+       button just disables), instead of a different control sliding under the
+       cursor after the layout changes. -->
   <div class="tts-row tts-transport">
-    {#if !$ttsState.isPlaying}
-      <button class="tts-button mod-cta" on:click={handlePlay} aria-label="Play">
-        ▶ 再生
+    <button
+      class="tts-button mod-cta"
+      on:click={handlePlay}
+      disabled={$ttsState.isPlaying}
+      aria-label="Play"
+    >
+      ▶ 再生
+    </button>
+    {#if $ttsState.isPaused}
+      <button class="tts-button" on:click={handleResume} disabled={!$ttsState.isPlaying} aria-label="Resume">
+        ▶ 再開
       </button>
     {:else}
-      {#if $ttsState.isPaused}
-        <button class="tts-button" on:click={handleResume} aria-label="Resume">▶ 再開</button>
-      {:else}
-        <button class="tts-button" on:click={handlePause} aria-label="Pause">⏸ 一時停止</button>
-      {/if}
-      <button class="tts-button" on:click={handleStop} aria-label="Stop">⏹ 停止</button>
-      <button class="tts-button" on:click={handleJumpToReading} aria-label="Jump to reading position">
-        📍 現在位置
+      <button class="tts-button" on:click={handlePause} disabled={!$ttsState.isPlaying} aria-label="Pause">
+        ⏸ 一時停止
       </button>
     {/if}
+    <button class="tts-button" on:click={handleStop} disabled={!$ttsState.isPlaying} aria-label="Stop">
+      ⏹ 停止
+    </button>
+    <button class="tts-button" on:click={handleJumpToReading} disabled={!$ttsState.isPlaying} aria-label="Jump to reading position">
+      📍 位置
+    </button>
   </div>
 
   <!-- Speed row -->
@@ -318,7 +347,7 @@
     <label class="tts-auto-scroll">
       <input
         type="checkbox"
-        checked={autoScroll}
+        checked={$ttsState.autoScroll}
         on:change={handleAutoScrollChange}
         aria-label="Auto-scroll"
       />
@@ -346,6 +375,16 @@
 
   .tts-transport {
     gap: 6px;
+    /* Keep controls left-aligned so the 再生 button stays at a fixed spot
+       whether stopped or playing. Prevents rapid clicks from landing on a
+       different button after the layout changes. */
+    justify-content: flex-start;
+  }
+
+  /* Reserve a stable width for the Play button so siblings appearing to its
+     right never shift it. */
+  .tts-transport .tts-button {
+    flex: 0 0 auto;
   }
 
   .tts-label {
@@ -381,8 +420,20 @@
     border-color: var(--interactive-accent);
   }
 
-  .tts-button.mod-cta:hover {
+  .tts-button.mod-cta:hover:not(:disabled) {
     background-color: var(--interactive-accent-hover);
+  }
+
+  .tts-button:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  /* Disabled Play should not keep the bright accent look */
+  .tts-button.mod-cta:disabled {
+    background-color: var(--interactive-normal);
+    color: var(--text-muted);
+    border-color: var(--background-modifier-border);
   }
 
   .tts-slider {
