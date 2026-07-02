@@ -17,6 +17,7 @@
   export let ttsEngine: TTSEngine;
   export let highlightManager: HighlightManager;
   export let settings: any;
+  export let plugin: any;
   export let app: App;
 
   let segments: RubySegment[] = [];
@@ -306,7 +307,7 @@
         <span class="section-icon">🔊</span>
         <h3 class="section-title">読み上げ</h3>
       </div>
-      <TTSControls {ttsEngine} {settings} {content} getTextFromCursor={getTextFromCursor} scrollToReading={scrollToReading} />
+      <TTSControls {ttsEngine} {settings} {plugin} {content} getTextFromCursor={getTextFromCursor} scrollToReading={scrollToReading} />
     </div>
 
     <!-- Editor Tools Section -->

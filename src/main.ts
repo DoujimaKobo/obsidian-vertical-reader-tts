@@ -91,7 +91,7 @@ export default class VerticalReaderPlugin extends Plugin {
     // Register view type
     this.registerView(
       VIEW_TYPE_VERTICAL_READER,
-      (leaf) => new VerticalReaderView(leaf, this.ttsEngine!, this.highlightManager, this.settings)
+      (leaf) => new VerticalReaderView(leaf, this.ttsEngine!, this.highlightManager, this.settings, this)
     );
 
     // Add ribbon icon
@@ -256,6 +256,24 @@ export default class VerticalReaderPlugin extends Plugin {
         this.ttsEngine.setUseVoicevox(false);
       }
     }
+  }
+
+  /**
+   * Switch the active TTS engine (called from the reader panel, not just the
+   * settings tab). Persists the choice, reinitializes VOICEVOX, optionally
+   * auto-launches it, and re-mounts open views so the change takes effect.
+   */
+  async switchEngine(engine: 'os' | 'voicevox') {
+    if (this.settings.ttsEngine === engine) return;
+    this.settings.ttsEngine = engine;
+    await this.saveSettings();
+    await this.reinitializeVoicevox();
+
+    if (engine === 'voicevox' && this.settings.voicevoxAutoLaunch && VoicevoxLauncher.canLaunch) {
+      this.launchVoicevox().catch(err => console.error('VOICEVOX auto-launch failed:', err));
+    }
+
+    this.refreshViews();
   }
 
   /**

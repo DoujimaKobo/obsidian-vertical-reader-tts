@@ -3,6 +3,7 @@ import VerticalReader from '../components/VerticalReader.svelte';
 import type { TTSEngine } from '../tts/TTSEngine';
 import type { HighlightManager } from '../tts/HighlightManager';
 import type { VerticalReaderSettings } from '../settings';
+import type VerticalReaderPlugin from '../main';
 
 export const VIEW_TYPE_VERTICAL_READER = 'vertical-reader-view';
 
@@ -14,18 +15,21 @@ export class VerticalReaderView extends ItemView {
   private ttsEngine: TTSEngine;
   private highlightManager: HighlightManager;
   private settings: VerticalReaderSettings;
+  private plugin: VerticalReaderPlugin;
   private currentContent: string = '';
 
   constructor(
     leaf: WorkspaceLeaf,
     ttsEngine: TTSEngine,
     highlightManager: HighlightManager,
-    settings: VerticalReaderSettings
+    settings: VerticalReaderSettings,
+    plugin: VerticalReaderPlugin
   ) {
     super(leaf);
     this.ttsEngine = ttsEngine;
     this.highlightManager = highlightManager;
     this.settings = settings;
+    this.plugin = plugin;
   }
 
   getViewType(): string {
@@ -68,6 +72,7 @@ export class VerticalReaderView extends ItemView {
         ttsEngine: this.ttsEngine,
         highlightManager: this.highlightManager,
         settings: this.settings,
+        plugin: this.plugin,
         app: this.app
       }
     });

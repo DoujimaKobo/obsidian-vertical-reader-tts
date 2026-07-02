@@ -152,6 +152,9 @@ export class VOICEVOXEngine {
         cleanText = RubyParser.stripRubyForTTS(cleanText);
       }
 
+      // Normalize pause symbols (…, ――) into commas so VOICEVOX pauses on them
+      cleanText = PunctuationProcessor.normalizePauseSymbols(cleanText);
+
       // Apply punctuation pauses
       if (PunctuationProcessor.shouldApplyPunctuation(
         this.commaPause,

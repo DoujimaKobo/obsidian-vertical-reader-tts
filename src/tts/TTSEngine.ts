@@ -1,4 +1,5 @@
 import { MarkdownCleaner } from '../parsers/MarkdownCleaner';
+import { PunctuationProcessor } from '../utils/PunctuationProcessor';
 import { VOICEVOXEngine } from './VOICEVOXEngine';
 
 /**
@@ -59,8 +60,12 @@ export class TTSEngine {
       }
 
       // Use Web Speech API only if VOICEVOX is not enabled
-      // Clean markdown syntax
-      const cleanText = MarkdownCleaner.clean(text);
+      // Clean markdown syntax, then normalize pause symbols (…, ――) into
+      // commas so the OS voice inserts a natural pause there. The replacement
+      // is 1:1 so highlight offsets stay aligned with the cleaned text.
+      const cleanText = PunctuationProcessor.normalizePauseSymbols(
+        MarkdownCleaner.clean(text)
+      );
       this.currentText = cleanText;
 
       if (!cleanText.trim()) {

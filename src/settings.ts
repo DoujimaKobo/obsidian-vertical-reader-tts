@@ -170,8 +170,8 @@ export class VerticalReaderSettingTab extends PluginSettingTab {
 
       // Server URL
       new Setting(containerEl)
-        .setName('VOICEVOX Server URL')
-        .setDesc('URL of the VOICEVOX Engine server (default: http://127.0.0.1:50021)')
+        .setName('VOICEVOXサーバーURL')
+        .setDesc('VOICEVOX EngineサーバーのURL（既定: http://127.0.0.1:50021）')
         .addText(text => text
           .setPlaceholder('http://127.0.0.1:50021')
           .setValue(this.plugin.settings.voicevoxServerUrl)
@@ -187,13 +187,13 @@ export class VerticalReaderSettingTab extends PluginSettingTab {
 
       // Test connection button
       new Setting(containerEl)
-        .setName('Test connection')
-        .setDesc('Check if VOICEVOX Engine is running and accessible')
+        .setName('接続テスト')
+        .setDesc('VOICEVOX Engineが起動していて接続できるか確認します')
         .addButton(button => button
-          .setButtonText('Test')
+          .setButtonText('テスト')
           .onClick(async () => {
             button.setDisabled(true);
-            button.setButtonText('Testing...');
+            button.setButtonText('テスト中...');
             try {
               // Ensure VOICEVOX engine is initialized
               if (!this.plugin.voicevoxEngine) {
@@ -215,20 +215,20 @@ export class VerticalReaderSettingTab extends PluginSettingTab {
               console.error(error);
             } finally {
               button.setDisabled(false);
-              button.setButtonText('Test');
+              button.setButtonText('テスト');
             }
           }));
 
       // Speaker selection
       const speakerSetting = new Setting(containerEl)
-        .setName('Speaker')
-        .setDesc('Select VOICEVOX speaker (click "Load Speakers" to fetch from server)');
+        .setName('話者')
+        .setDesc('VOICEVOXの話者を選択します（「話者を読み込む」でサーバーから取得）');
 
       speakerSetting.addButton(button => button
-        .setButtonText('Load Speakers')
+        .setButtonText('話者を読み込む')
         .onClick(async () => {
           button.setDisabled(true);
-          button.setButtonText('Loading...');
+          button.setButtonText('読み込み中...');
           try {
             // Ensure VOICEVOX engine is initialized
             if (!this.plugin.voicevoxEngine) {
@@ -247,12 +247,12 @@ export class VerticalReaderSettingTab extends PluginSettingTab {
             console.error(error);
           } finally {
             button.setDisabled(false);
-            button.setButtonText('Load Speakers');
+            button.setButtonText('話者を読み込む');
           }
         }));
 
       speakerSetting.addText(text => text
-        .setPlaceholder('Speaker ID')
+        .setPlaceholder('話者ID')
         .setValue(String(this.plugin.settings.voicevoxSpeakerId))
         .onChange(async (value) => {
           const id = parseInt(value);
@@ -267,8 +267,8 @@ export class VerticalReaderSettingTab extends PluginSettingTab {
 
       // Speed scale
       new Setting(containerEl)
-        .setName('Speech speed')
-        .setDesc('Adjust VOICEVOX speech speed (0.5 - 2.0)')
+        .setName('再生速度')
+        .setDesc('VOICEVOXの読み上げ速度を調整します（0.5〜2.0）')
         .addSlider(slider => slider
           .setLimits(0.5, 2.0, 0.1)
           .setValue(this.plugin.settings.voicevoxSpeedScale)
@@ -283,8 +283,8 @@ export class VerticalReaderSettingTab extends PluginSettingTab {
 
       // Ruby reading option
       new Setting(containerEl)
-        .setName('Prioritize ruby readings')
-        .setDesc('When enabled, VOICEVOX will read ruby annotations (furigana) instead of base text. Recommended for accurate kanji pronunciation.')
+        .setName('ルビ（読み）を優先')
+        .setDesc('有効にすると、VOICEVOXが漢字ではなくルビ（ふりがな）を読み上げます。正確な読みのために推奨。')
         .addToggle(toggle => toggle
           .setValue(this.plugin.settings.useRubyForVoicevox)
           .onChange(async (value) => {
@@ -348,7 +348,7 @@ export class VerticalReaderSettingTab extends PluginSettingTab {
           }));
 
       containerEl.createEl('p', {
-        text: 'Note: VOICEVOX Engine must be running separately. Download from voicevox.hiroshiba.jp',
+        text: '※ VOICEVOX Engineは別途起動が必要です。voicevox.hiroshiba.jp からダウンロードできます。',
         cls: 'setting-item-description'
       });
     }
@@ -392,11 +392,11 @@ export class VerticalReaderSettingTab extends PluginSettingTab {
 
     // Voice selection
     new Setting(containerEl)
-      .setName('Default voice')
-      .setDesc('Select the default voice for text-to-speech')
+      .setName('デフォルト音声')
+      .setDesc('読み上げに使うデフォルトの音声を選択します')
       .addDropdown(dropdown => {
         // Add empty option
-        dropdown.addOption('', 'System default');
+        dropdown.addOption('', 'システム標準');
 
         // Get available voices
         const voices = window.speechSynthesis.getVoices();
@@ -441,8 +441,8 @@ export class VerticalReaderSettingTab extends PluginSettingTab {
 
     // Playback rate
     new Setting(containerEl)
-      .setName('Default playback speed')
-      .setDesc('Set the default speed for text-to-speech (0.5 - 3.0)')
+      .setName('デフォルト再生速度')
+      .setDesc('読み上げの初期速度を設定します（0.5〜3.0）')
       .addSlider(slider => slider
         .setLimits(0.5, 3.0, 0.1)
         .setValue(this.plugin.settings.defaultRate)
@@ -454,15 +454,15 @@ export class VerticalReaderSettingTab extends PluginSettingTab {
 
     // Language
     new Setting(containerEl)
-      .setName('Default language')
-      .setDesc('Set the default language for text-to-speech')
+      .setName('デフォルト言語')
+      .setDesc('読み上げの言語を設定します')
       .addDropdown(dropdown => dropdown
-        .addOption('ja-JP', 'Japanese')
-        .addOption('en-US', 'English (US)')
-        .addOption('en-GB', 'English (UK)')
-        .addOption('zh-CN', 'Chinese (Simplified)')
-        .addOption('zh-TW', 'Chinese (Traditional)')
-        .addOption('ko-KR', 'Korean')
+        .addOption('ja-JP', '日本語')
+        .addOption('en-US', '英語（米国）')
+        .addOption('en-GB', '英語（英国）')
+        .addOption('zh-CN', '中国語（簡体）')
+        .addOption('zh-TW', '中国語（繁体）')
+        .addOption('ko-KR', '韓国語')
         .setValue(this.plugin.settings.defaultLang)
         .onChange(async (value) => {
           this.plugin.settings.defaultLang = value;
@@ -470,9 +470,9 @@ export class VerticalReaderSettingTab extends PluginSettingTab {
         }));
 
     // Info section
-    containerEl.createEl('h3', { text: 'About' });
+    containerEl.createEl('h3', { text: 'このプラグインについて' });
     containerEl.createEl('p', {
-      text: 'This plugin provides vertical reading view with Ruby text support and text-to-speech functionality.'
+      text: '縦書きの読書ビュー、ルビ表示、そして読み上げ（OS標準 / VOICEVOX）機能を提供します。'
     });
   }
 

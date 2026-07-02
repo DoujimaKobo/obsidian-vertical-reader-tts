@@ -7,9 +7,22 @@
 
   export let ttsEngine: TTSEngine;
   export let settings: any;
+  export let plugin: any;
   export let content: string;
   export let getTextFromCursor: () => string;
   export let scrollToReading: () => void;
+
+  let currentEngine: 'os' | 'voicevox' = settings?.ttsEngine === 'voicevox' ? 'voicevox' : 'os';
+
+  async function handleEngineChange() {
+    // Stop any playback before switching, then hand off to the plugin, which
+    // re-mounts this view (so the component reloads with the new engine).
+    ttsEngine.stop();
+    ttsState.stop();
+    if (plugin?.switchEngine) {
+      await plugin.switchEngine(currentEngine);
+    }
+  }
 
   let playbackRate = settings?.defaultRate || 1.0;
   let voices: SpeechSynthesisVoice[] = [];
@@ -216,6 +229,20 @@
 </script>
 
 <div class="tts-controls">
+  <!-- Engine selector: switch OS / VOICEVOX without opening settings -->
+  <div class="tts-row">
+    <span class="tts-label">エンジン</span>
+    <select
+      class="tts-select"
+      bind:value={currentEngine}
+      on:change={handleEngineChange}
+      aria-label="TTS engine"
+    >
+      <option value="os">OS標準（Windows / Android）</option>
+      <option value="voicevox">VOICEVOX</option>
+    </select>
+  </div>
+
   <!-- Transport row: fixed order, its own line so nothing else shifts -->
   <div class="tts-row tts-transport">
     {#if !$ttsState.isPlaying}
