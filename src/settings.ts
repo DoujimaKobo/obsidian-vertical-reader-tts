@@ -7,11 +7,12 @@ import type { VOICEVOXSpeaker } from './types';
  */
 /**
  * TTS engine selection.
- * - 'os'       : OS-native voices via the Web Speech API
- *                (Windows SAPI voices on desktop, Android TTS on mobile).
- * - 'voicevox' : Local/remote VOICEVOX Engine (high quality Japanese).
+ * - 'os'            : OS-native voices via the Web Speech API
+ *                     (Windows SAPI voices on desktop, Android TTS on mobile).
+ * - 'voicevox'      : VOICEVOX Engine (default port 50021).
+ * - 'voicevox_nemo' : VOICEVOX Nemo Engine — same HTTP API, default port 50121.
  */
-export type TTSEngineType = 'os' | 'voicevox';
+export type TTSEngineType = 'os' | 'voicevox' | 'voicevox_nemo';
 
 export interface VerticalReaderSettings {
   // Which TTS engine to use. Default is the OS-native engine.
@@ -27,6 +28,13 @@ export interface VerticalReaderSettings {
   voicevoxEnginePath: string; // Path to the VOICEVOX executable (run.exe / run)
   voicevoxServerUrl: string;
   voicevoxSpeakerId: number;
+
+  // VOICEVOX Nemo settings (same API as VOICEVOX, different port/speakers/exe)
+  voicevoxNemoEnginePath: string;
+  voicevoxNemoServerUrl: string;
+  voicevoxNemoSpeakerId: number;
+
+  // Shared VOICEVOX/Nemo tuning
   voicevoxSpeedScale: number;
   useRubyForVoicevox: boolean;
   voicevoxCommaPause: number; // 読点（、）の休止時間（秒）
@@ -56,6 +64,12 @@ export const DEFAULT_SETTINGS: VerticalReaderSettings = {
   voicevoxEnginePath: '',
   voicevoxServerUrl: 'http://127.0.0.1:50021',
   voicevoxSpeakerId: 0,
+
+  // VOICEVOX Nemo defaults (default port 50121)
+  voicevoxNemoEnginePath: '',
+  voicevoxNemoServerUrl: 'http://127.0.0.1:50121',
+  voicevoxNemoSpeakerId: 0,
+
   voicevoxSpeedScale: 1.0,
   useRubyForVoicevox: true,
   voicevoxCommaPause: 0.3, // 読点の休止時間（秒）
@@ -90,13 +104,14 @@ export class VerticalReaderSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('TTSエンジン')
-      .setDesc('OS標準（Windows / Android のデフォルト音声）か、VOICEVOX（高品質な日本語音声）を選択します。')
+      .setDesc('OS標準（Windows / Android のデフォルト音声）、VOICEVOX、または VOICEVOX Nemo を選択します。')
       .addDropdown(dropdown => dropdown
         .addOption('os', 'OS標準（Windows / Android）')
         .addOption('voicevox', 'VOICEVOX')
+        .addOption('voicevox_nemo', 'VOICEVOX Nemo')
         .setValue(this.plugin.settings.ttsEngine)
         .onChange(async (value) => {
-          this.plugin.settings.ttsEngine = value as 'os' | 'voicevox';
+          this.plugin.settings.ttsEngine = value as TTSEngineType;
           await this.plugin.saveSettings();
 
           // Reinitialize VOICEVOX Engine to match the new selection
@@ -109,14 +124,27 @@ export class VerticalReaderSettingTab extends PluginSettingTab {
           this.display();
         }));
 
-    if (this.plugin.settings.ttsEngine === 'voicevox') {
-      containerEl.createEl('h3', { text: 'VOICEVOX 設定' });
+    if (this.plugin.settings.ttsEngine !== 'os') {
+      // VOICEVOX and VOICEVOX Nemo share this settings block; only the URL,
+      // executable path, and speaker are stored per-engine.
+      const isNemo = this.plugin.settings.ttsEngine === 'voicevox_nemo';
+      const engineLabel = isNemo ? 'VOICEVOX Nemo' : 'VOICEVOX';
+      const defaultUrl = isNemo ? 'http://127.0.0.1:50121' : 'http://127.0.0.1:50021';
+      const s = this.plugin.settings;
+      const getUrl = () => isNemo ? s.voicevoxNemoServerUrl : s.voicevoxServerUrl;
+      const setUrl = (v: string) => { if (isNemo) s.voicevoxNemoServerUrl = v; else s.voicevoxServerUrl = v; };
+      const getPath = () => isNemo ? s.voicevoxNemoEnginePath : s.voicevoxEnginePath;
+      const setPath = (v: string) => { if (isNemo) s.voicevoxNemoEnginePath = v; else s.voicevoxEnginePath = v; };
+      const getSpeaker = () => isNemo ? s.voicevoxNemoSpeakerId : s.voicevoxSpeakerId;
+      const setSpeaker = (v: number) => { if (isNemo) s.voicevoxNemoSpeakerId = v; else s.voicevoxSpeakerId = v; };
+
+      containerEl.createEl('h3', { text: `${engineLabel} 設定` });
 
       // Auto-launch toggle (desktop only)
       if (Platform.isDesktopApp) {
         new Setting(containerEl)
-          .setName('VOICEVOXを自動起動する')
-          .setDesc('下で指定したインストール場所からVOICEVOX Engineを自動的に起動します（デスクトップ版のみ）。')
+          .setName(`${engineLabel}を自動起動する`)
+          .setDesc(`下で指定したインストール場所から${engineLabel} Engineを自動的に起動します（デスクトップ版のみ）。`)
           .addToggle(toggle => toggle
             .setValue(this.plugin.settings.voicevoxAutoLaunch)
             .onChange(async (value) => {
@@ -126,22 +154,24 @@ export class VerticalReaderSettingTab extends PluginSettingTab {
             }));
 
         if (this.plugin.settings.voicevoxAutoLaunch) {
-          // VOICEVOX install path
+          // Engine install path
           new Setting(containerEl)
-            .setName('VOICEVOXの実行ファイルのパス')
-            .setDesc('VOICEVOXの実行ファイル（Windowsは run.exe、macOS/Linuxは run）へのフルパスを指定します。例: C:\\Program Files\\VOICEVOX\\vv-engine\\run.exe')
+            .setName(`${engineLabel}の実行ファイルのパス`)
+            .setDesc(`${engineLabel}の実行ファイル（Windowsは run.exe、macOS/Linuxは run）へのフルパスを指定します。`)
             .addText(text => text
-              .setPlaceholder('C:\\Program Files\\VOICEVOX\\vv-engine\\run.exe')
-              .setValue(this.plugin.settings.voicevoxEnginePath)
+              .setPlaceholder(isNemo
+                ? 'C:\\Program Files\\VOICEVOX Nemo\\vv-engine\\run.exe'
+                : 'C:\\Program Files\\VOICEVOX\\vv-engine\\run.exe')
+              .setValue(getPath())
               .onChange(async (value) => {
-                this.plugin.settings.voicevoxEnginePath = value.trim();
+                setPath(value.trim());
                 await this.plugin.saveSettings();
               }));
 
           // Launch button
           new Setting(containerEl)
             .setName('今すぐ起動')
-            .setDesc('指定したパスからVOICEVOX Engineを起動し、接続できるまで待機します。')
+            .setDesc(`指定したパスから${engineLabel} Engineを起動し、接続できるまで待機します。`)
             .addButton(button => button
               .setButtonText('起動')
               .onClick(async () => {
@@ -150,8 +180,8 @@ export class VerticalReaderSettingTab extends PluginSettingTab {
                 try {
                   const ok = await this.plugin.launchVoicevox();
                   new Notice(ok
-                    ? 'VOICEVOX Engineを起動しました。'
-                    : 'VOICEVOX Engineの起動に失敗しました。パスを確認してください。');
+                    ? `${engineLabel} Engineを起動しました。`
+                    : `${engineLabel} Engineの起動に失敗しました。パスを確認してください。`);
                 } catch (error) {
                   new Notice('起動エラー: ' + (error instanceof Error ? error.message : String(error)));
                   console.error(error);
@@ -163,25 +193,25 @@ export class VerticalReaderSettingTab extends PluginSettingTab {
         }
       } else {
         containerEl.createEl('p', {
-          text: 'モバイル版では自動起動は使えません。別途VOICEVOX Engineを起動し、下のサーバーURLを指定してください。',
+          text: `モバイル版では自動起動は使えません。別途${engineLabel} Engineを起動し、下のサーバーURLを指定してください。`,
           cls: 'setting-item-description'
         });
       }
 
       // Server URL
       new Setting(containerEl)
-        .setName('VOICEVOXサーバーURL')
-        .setDesc('VOICEVOX EngineサーバーのURL（既定: http://127.0.0.1:50021）')
+        .setName(`${engineLabel}サーバーURL`)
+        .setDesc(`${engineLabel} EngineサーバーのURL（既定: ${defaultUrl}）`)
         .addText(text => text
-          .setPlaceholder('http://127.0.0.1:50021')
-          .setValue(this.plugin.settings.voicevoxServerUrl)
+          .setPlaceholder(defaultUrl)
+          .setValue(getUrl())
           .onChange(async (value) => {
-            this.plugin.settings.voicevoxServerUrl = value || 'http://127.0.0.1:50021';
+            setUrl(value || defaultUrl);
             await this.plugin.saveSettings();
 
             // Reinitialize VOICEVOX Engine with new URL
             if (this.plugin.voicevoxEngine) {
-              this.plugin.voicevoxEngine.setServerUrl(this.plugin.settings.voicevoxServerUrl);
+              this.plugin.voicevoxEngine.setServerUrl(getUrl());
             }
           }));
 
@@ -222,7 +252,7 @@ export class VerticalReaderSettingTab extends PluginSettingTab {
       // Speaker selection
       const speakerSetting = new Setting(containerEl)
         .setName('話者')
-        .setDesc('VOICEVOXの話者を選択します（「話者を読み込む」でサーバーから取得）');
+        .setDesc(`${engineLabel}の話者を選択します（「話者を読み込む」でサーバーから取得）`);
 
       speakerSetting.addButton(button => button
         .setButtonText('話者を読み込む')
@@ -237,8 +267,8 @@ export class VerticalReaderSettingTab extends PluginSettingTab {
 
             if (this.plugin.voicevoxEngine) {
               const speakers = await this.plugin.voicevoxEngine.getSpeakers();
-              this.displaySpeakerDropdown(speakerSetting, speakers);
-              new Notice(`Loaded ${speakers.length} speakers`);
+              this.displaySpeakerDropdown(speakerSetting, speakers, setSpeaker, getSpeaker());
+              new Notice(`${speakers.length}件の話者を読み込みました`);
             } else {
               new Notice('VOICEVOX Engineの初期化に失敗しました');
             }
@@ -253,11 +283,11 @@ export class VerticalReaderSettingTab extends PluginSettingTab {
 
       speakerSetting.addText(text => text
         .setPlaceholder('話者ID')
-        .setValue(String(this.plugin.settings.voicevoxSpeakerId))
+        .setValue(String(getSpeaker()))
         .onChange(async (value) => {
           const id = parseInt(value);
           if (!isNaN(id)) {
-            this.plugin.settings.voicevoxSpeakerId = id;
+            setSpeaker(id);
             await this.plugin.saveSettings();
             if (this.plugin.voicevoxEngine) {
               this.plugin.voicevoxEngine.setSpeaker(id);
@@ -472,7 +502,7 @@ export class VerticalReaderSettingTab extends PluginSettingTab {
     // Info section
     containerEl.createEl('h3', { text: 'このプラグインについて' });
     containerEl.createEl('p', {
-      text: '縦書きの読書ビュー、ルビ表示、そして読み上げ（OS標準 / VOICEVOX）機能を提供します。'
+      text: '縦書きの読書ビュー、ルビ表示、そして読み上げ（OS標準 / VOICEVOX / VOICEVOX Nemo）機能を提供します。'
     });
   }
 
@@ -486,7 +516,12 @@ export class VerticalReaderSettingTab extends PluginSettingTab {
   /**
    * Display speaker dropdown dynamically
    */
-  private displaySpeakerDropdown(setting: Setting, speakers: VOICEVOXSpeaker[]) {
+  private displaySpeakerDropdown(
+    setting: Setting,
+    speakers: VOICEVOXSpeaker[],
+    setSpeaker: (id: number) => void,
+    currentSpeakerId: number
+  ) {
     // Remove existing dropdown if any
     setting.controlEl.querySelectorAll('select').forEach(el => el.remove());
 
@@ -501,11 +536,11 @@ export class VerticalReaderSettingTab extends PluginSettingTab {
       });
 
       dropdown
-        .setValue(String(this.plugin.settings.voicevoxSpeakerId))
+        .setValue(String(currentSpeakerId))
         .onChange(async (value) => {
           const id = parseInt(value);
           if (!isNaN(id)) {
-            this.plugin.settings.voicevoxSpeakerId = id;
+            setSpeaker(id);
             await this.plugin.saveSettings();
             if (this.plugin.voicevoxEngine) {
               this.plugin.voicevoxEngine.setSpeaker(id);

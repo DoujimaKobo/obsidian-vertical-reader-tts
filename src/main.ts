@@ -6,7 +6,7 @@ import { VoicevoxLauncher } from './tts/VoicevoxLauncher';
 import { HighlightManager } from './tts/HighlightManager';
 import { EditorSync } from './utils/EditorSync';
 import { ttsState } from './tts/TTSState';
-import { VerticalReaderSettings, DEFAULT_SETTINGS, VerticalReaderSettingTab } from './settings';
+import { VerticalReaderSettings, DEFAULT_SETTINGS, VerticalReaderSettingTab, TTSEngineType } from './settings';
 
 /**
  * Obsidian Plugin for vertical reading with TTS support
@@ -19,9 +19,30 @@ export default class VerticalReaderPlugin extends Plugin {
   highlightManager!: HighlightManager;
   editorSync: EditorSync | null = null;
 
-  /** True when the VOICEVOX engine is the active TTS engine. */
+  /** True when a VOICEVOX-family engine (VOICEVOX or Nemo) is active. */
   private get useVoicevox(): boolean {
-    return this.settings.ttsEngine === 'voicevox';
+    return this.settings.ttsEngine === 'voicevox' || this.settings.ttsEngine === 'voicevox_nemo';
+  }
+
+  /**
+   * Resolve the connection settings for the active VOICEVOX-family engine.
+   * VOICEVOX and VOICEVOX Nemo share the same HTTP API, so we only swap the
+   * server URL, executable path, and speaker; all tuning (speed, ruby, pauses)
+   * is shared.
+   */
+  private voicevoxConn(): { url: string; speakerId: number; enginePath: string } {
+    if (this.settings.ttsEngine === 'voicevox_nemo') {
+      return {
+        url: this.settings.voicevoxNemoServerUrl,
+        speakerId: this.settings.voicevoxNemoSpeakerId,
+        enginePath: this.settings.voicevoxNemoEnginePath,
+      };
+    }
+    return {
+      url: this.settings.voicevoxServerUrl,
+      speakerId: this.settings.voicevoxSpeakerId,
+      enginePath: this.settings.voicevoxEnginePath,
+    };
   }
 
   async onload() {
@@ -40,9 +61,10 @@ export default class VerticalReaderPlugin extends Plugin {
     try {
       // Initialize VOICEVOX Engine if enabled
       if (this.useVoicevox) {
+        const conn = this.voicevoxConn();
         this.voicevoxEngine = new VOICEVOXEngine(
-          this.settings.voicevoxServerUrl,
-          this.settings.voicevoxSpeakerId,
+          conn.url,
+          conn.speakerId,
           this.settings.voicevoxSpeedScale,
           this.settings.useRubyForVoicevox,
           this.settings.voicevoxCommaPause,
@@ -167,10 +189,8 @@ export default class VerticalReaderPlugin extends Plugin {
    * @returns true when the engine became reachable.
    */
   async launchVoicevox(): Promise<boolean> {
-    return this.voicevoxLauncher.launch(
-      this.settings.voicevoxEnginePath,
-      this.settings.voicevoxServerUrl
-    );
+    const conn = this.voicevoxConn();
+    return this.voicevoxLauncher.launch(conn.enginePath, conn.url);
   }
 
   /**
@@ -191,8 +211,9 @@ export default class VerticalReaderPlugin extends Plugin {
 
     // Update VOICEVOX settings if engine exists
     if (this.voicevoxEngine) {
-      this.voicevoxEngine.setServerUrl(this.settings.voicevoxServerUrl);
-      this.voicevoxEngine.setSpeaker(this.settings.voicevoxSpeakerId);
+      const conn = this.voicevoxConn();
+      this.voicevoxEngine.setServerUrl(conn.url);
+      this.voicevoxEngine.setSpeaker(conn.speakerId);
       this.voicevoxEngine.setSpeed(this.settings.voicevoxSpeedScale);
       this.voicevoxEngine.setUseRubyReading(this.settings.useRubyForVoicevox);
       this.voicevoxEngine.setPunctuationPauses(
@@ -227,9 +248,10 @@ export default class VerticalReaderPlugin extends Plugin {
 
     // Create new engine
     if (this.useVoicevox) {
+      const conn = this.voicevoxConn();
       this.voicevoxEngine = new VOICEVOXEngine(
-        this.settings.voicevoxServerUrl,
-        this.settings.voicevoxSpeakerId,
+        conn.url,
+        conn.speakerId,
         this.settings.voicevoxSpeedScale,
         this.settings.useRubyForVoicevox,
         this.settings.voicevoxCommaPause,
@@ -263,13 +285,13 @@ export default class VerticalReaderPlugin extends Plugin {
    * settings tab). Persists the choice, reinitializes VOICEVOX, optionally
    * auto-launches it, and re-mounts open views so the change takes effect.
    */
-  async switchEngine(engine: 'os' | 'voicevox') {
+  async switchEngine(engine: TTSEngineType) {
     if (this.settings.ttsEngine === engine) return;
     this.settings.ttsEngine = engine;
     await this.saveSettings();
     await this.reinitializeVoicevox();
 
-    if (engine === 'voicevox' && this.settings.voicevoxAutoLaunch && VoicevoxLauncher.canLaunch) {
+    if (engine !== 'os' && this.settings.voicevoxAutoLaunch && VoicevoxLauncher.canLaunch) {
       this.launchVoicevox().catch(err => console.error('VOICEVOX auto-launch failed:', err));
     }
 

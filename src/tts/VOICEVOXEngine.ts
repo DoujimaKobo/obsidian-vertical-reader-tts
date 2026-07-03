@@ -1,11 +1,13 @@
-import { requestUrl, Notice } from 'obsidian';
+import { requestUrl, Notice, Platform } from 'obsidian';
 import type { AudioQuery, VOICEVOXSpeaker } from '../types';
 import { MarkdownCleaner } from '../parsers/MarkdownCleaner';
 import { RubyParser } from '../parsers/RubyParser';
 import { PunctuationProcessor } from '../utils/PunctuationProcessor';
 
 // VOICEVOX設定
-const MAX_TEXT_LENGTH = 500; // 1回のリクエストで送信する最大文字数
+// チャンクは小さめにする: 1リクエストの合成が軽くなり、停止も素早く効き、
+// 途中キャンセルの粒度も細かくなる（大きいと合成が重く、停止が効きにくい）。
+const MAX_TEXT_LENGTH = 120; // 1回のリクエストで送信する最大文字数
 const SENTENCE_SPLIT_PATTERN = /[。！？\n]+/; // 文の区切りパターン
 
 /**
@@ -40,6 +42,16 @@ export class VOICEVOXEngine {
   private isProcessing: boolean = false;
   private isPrefetching: boolean = false;
   private shouldCancelPrefetch: boolean = false;
+
+  // HTTP戦略:
+  // Obsidian(Electron)はレンダラからのローカルhost fetch を拒否する（ERR_CONNECTION_REFUSED）。
+  // そこでデスクトップでは Node の http/https モジュールを使う（socket.destroy() で
+  // 送信中リクエストを本当に中断でき、これが「停止」を実際に効かせる鍵）。
+  // モバイルや Node http が使えない場合は Obsidian の requestUrl にフォールバック
+  // （CORSフリーだが中断は不可）。cancellable_synthesis 非対応なら /synthesis に落とす。
+  private useNodeHttp: boolean = Platform.isDesktopApp;
+  private useCancellableSynthesis: boolean = true;
+  private initializedSpeakers: Set<number> = new Set(); // initialize_speaker 済み
 
   // キャンセルコントローラー（すべてのfetchを一括キャンセル）
   private prefetchAbortController: AbortController | null = null;
@@ -86,15 +98,124 @@ export class VOICEVOXEngine {
   }
 
   /**
+   * Shared HTTP request to the VOICEVOX server.
+   *
+   * Prefers the DOM `fetch` so the request can be truly aborted (via
+   * `mainAbortController`) — this is what makes "stop" actually cancel an
+   * in-flight synthesis and free the engine's CPU. If `fetch` fails for a
+   * non-abort reason (typically CORS on some setups), it permanently falls back
+   * to Obsidian's `requestUrl`, which is CORS-free but cannot be cancelled.
+   */
+  private async request(
+    method: 'GET' | 'POST',
+    path: string,
+    opts: { jsonBody?: unknown; expect: 'json' | 'arraybuffer' | 'none' } = { expect: 'none' }
+  ): Promise<any> {
+    const url = `${this.serverUrl}${path}`;
+    const signal = this.mainAbortController?.signal;
+    if (signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
+
+    const body = opts.jsonBody !== undefined ? JSON.stringify(opts.jsonBody) : undefined;
+    const headers = body !== undefined ? { 'Content-Type': 'application/json' } : undefined;
+
+    // Preferred path: Node http (desktop) — abortable via socket destroy.
+    if (this.useNodeHttp) {
+      try {
+        return await this.nodeRequest(method, url, headers, body, opts.expect, signal);
+      } catch (error) {
+        if (signal?.aborted || (error as { name?: string })?.name === 'AbortError') {
+          throw new DOMException('Aborted', 'AbortError');
+        }
+        // Node http unavailable in this runtime → fall back permanently.
+        console.warn('[VOICEVOX] node http failed, falling back to requestUrl:', error);
+        this.useNodeHttp = false;
+      }
+    }
+
+    // Fallback: Obsidian requestUrl (CORS-free but NOT abortable mid-flight)
+    if (signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
+    const res = await requestUrl({ url, method, headers, body, throw: false });
+    if (signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
+    if (res.status < 200 || res.status >= 300) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    if (opts.expect === 'json') return res.json;
+    if (opts.expect === 'arraybuffer') return res.arrayBuffer;
+    return null;
+  }
+
+  /**
+   * Node http/https request (desktop only). Returns parsed JSON / ArrayBuffer.
+   * Aborting `signal` destroys the socket, which cancels the in-flight request
+   * and — for /cancellable_synthesis — makes the engine kill the synthesis
+   * process, freeing CPU. This is what makes "stop" actually stop.
+   */
+  private nodeRequest(
+    method: string,
+    url: string,
+    headers: Record<string, string> | undefined,
+    body: string | undefined,
+    expect: 'json' | 'arraybuffer' | 'none',
+    signal: AbortSignal | undefined
+  ): Promise<any> {
+    return new Promise((resolve, reject) => {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const httpMod = url.startsWith('https') ? require('https') : require('http');
+
+      const req = httpMod.request(url, { method, headers }, (res: any) => {
+        const status: number = res.statusCode ?? 0;
+        if (status < 200 || status >= 300) {
+          res.resume(); // drain
+          reject(new Error(`HTTP ${status}`));
+          return;
+        }
+        const parts: Buffer[] = [];
+        res.on('data', (c: Buffer) => parts.push(c));
+        res.on('end', () => {
+          try {
+            const buf = Buffer.concat(parts);
+            if (expect === 'json') {
+              resolve(JSON.parse(buf.toString('utf8')));
+            } else if (expect === 'arraybuffer') {
+              resolve(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+            } else {
+              resolve(null);
+            }
+          } catch (e) {
+            reject(e);
+          }
+        });
+      });
+
+      req.on('error', (err: Error) => reject(err));
+
+      if (signal) {
+        const onAbort = () => req.destroy(new DOMException('Aborted', 'AbortError'));
+        if (signal.aborted) {
+          onAbort();
+        } else {
+          signal.addEventListener('abort', onAbort, { once: true });
+        }
+      }
+
+      if (body !== undefined) req.write(body);
+      req.end();
+    });
+  }
+
+  /**
    * Check if VOICEVOX Engine is available
    */
   async checkConnection(): Promise<boolean> {
     try {
-      const response = await requestUrl({
-        url: `${this.serverUrl}/version`,
-        method: 'GET'
-      });
-      return response.status === 200;
+      await this.request('GET', '/version', { expect: 'json' });
+      return true;
     } catch (error) {
       return false;
     }
@@ -105,19 +226,27 @@ export class VOICEVOXEngine {
    */
   async getSpeakers(): Promise<VOICEVOXSpeaker[]> {
     try {
-      const response = await requestUrl({
-        url: `${this.serverUrl}/speakers`,
-        method: 'GET'
-      });
-
-      if (response.status === 200) {
-        return response.json as VOICEVOXSpeaker[];
-      }
-      throw new Error(`Failed to get speakers: ${response.status}`);
+      return await this.request('GET', '/speakers', { expect: 'json' }) as VOICEVOXSpeaker[];
     } catch (error) {
       console.error('Error fetching speakers:', error);
       new Notice('VOICEVOX Engineへの接続に失敗しました。サーバーが起動しているか確認してください。');
       throw error;
+    }
+  }
+
+  /**
+   * Pre-load a speaker so the first synthesis isn't slowed down by model
+   * loading. Best-effort: failures are ignored (synthesis still works).
+   */
+  private async initializeSpeaker(speakerId: number): Promise<void> {
+    if (this.initializedSpeakers.has(speakerId)) return;
+    try {
+      await this.request('POST', `/initialize_speaker?speaker=${speakerId}&skip_reinit=true`, { expect: 'none' });
+      this.initializedSpeakers.add(speakerId);
+      console.log('[VOICEVOX] initialized speaker', speakerId);
+    } catch (error) {
+      // Non-fatal; some engines may not support it or may be busy.
+      console.warn('[VOICEVOX] initialize_speaker failed (continuing):', error);
     }
   }
 
@@ -190,12 +319,12 @@ export class VOICEVOXEngine {
       this.totalChunks = chunks.length;
       this.currentChunkIndex = 0;
 
-      if (chunks.length > 10) {
-        new Notice(`⚠️ テキストが長いため、${chunks.length}回に分けて再生します（シームレス再生）`);
-      }
-
       this.isSpeakingState = true;
       this.isPausedState = false;
+
+      // 話者をウォームアップして初回合成の待ちを減らす
+      this.showStatusNotice('🎵 音声エンジンを準備中...');
+      await this.initializeSpeaker(this.speakerId);
 
       // シームレス・プリフェッチで順次再生
       await this.speakChunksSeamlessly(chunks);
@@ -471,85 +600,42 @@ export class VOICEVOXEngine {
    * Create audio query from text
    */
   private async createAudioQuery(text: string): Promise<AudioQuery> {
-    try {
-      console.log(`Creating audio query for text (${text.length} chars):`, text.substring(0, 50));
-
-      // AbortControllerでキャンセル可能にする
-      if (this.mainAbortController?.signal.aborted) {
-        throw new Error('Request cancelled');
-      }
-
-      const response = await requestUrl({
-        url: `${this.serverUrl}/audio_query?text=${encodeURIComponent(text)}&speaker=${this.speakerId}`,
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
-
-      // リクエスト後もキャンセルをチェック
-      if (this.mainAbortController?.signal.aborted) {
-        throw new Error('Request cancelled');
-      }
-
-      if (response.status === 200) {
-        console.log('Audio query created successfully');
-        return response.json as AudioQuery;
-      }
-
-      const errorMsg = `Audio query failed: ${response.status}`;
-      console.error(errorMsg, response);
-      throw new Error(errorMsg);
-    } catch (error) {
-      console.error('Error creating audio query:', error);
-      if (error instanceof Error && error.message.includes('500')) {
-        throw new Error('VOICEVOX Engine 500エラー。テキストに問題がある可能性があります。');
-      }
-      throw error;
-    }
+    console.log(`Creating audio query for text (${text.length} chars):`, text.substring(0, 50));
+    const path = `/audio_query?text=${encodeURIComponent(text)}&speaker=${this.speakerId}`;
+    return await this.request('POST', path, { expect: 'json' }) as AudioQuery;
   }
 
   /**
-   * Synthesize speech from audio query
+   * Synthesize speech from audio query.
+   * Uses /cancellable_synthesis when available (the engine runs each synthesis
+   * in a separate process and kills it if the client disconnects), so aborting
+   * the fetch also frees the engine's CPU. Falls back to /synthesis if the
+   * cancellable endpoint isn't available.
    */
   private async synthesize(audioQuery: AudioQuery): Promise<ArrayBuffer> {
-    try {
-      console.log('Synthesizing speech with speedScale:', audioQuery.speedScale);
+    console.log('Synthesizing speech with speedScale:', audioQuery.speedScale);
 
-      // AbortControllerでキャンセル可能にする
-      if (this.mainAbortController?.signal.aborted) {
-        throw new Error('Request cancelled');
+    // cancellable_synthesis only helps if we can actually disconnect (Node http).
+    if (this.useNodeHttp && this.useCancellableSynthesis) {
+      try {
+        return await this.request(
+          'POST',
+          `/cancellable_synthesis?speaker=${this.speakerId}`,
+          { jsonBody: audioQuery, expect: 'arraybuffer' }
+        ) as ArrayBuffer;
+      } catch (error) {
+        if ((error as { name?: string })?.name === 'AbortError') throw error;
+        // Endpoint missing/disabled (e.g. 404) → stop trying it this session.
+        console.warn('[VOICEVOX] cancellable_synthesis unavailable, using /synthesis:', error);
+        this.useCancellableSynthesis = false;
       }
-
-      const response = await requestUrl({
-        url: `${this.serverUrl}/synthesis?speaker=${this.speakerId}`,
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(audioQuery)
-      });
-
-      // リクエスト後もキャンセルをチェック
-      if (this.mainAbortController?.signal.aborted) {
-        throw new Error('Request cancelled');
-      }
-
-      if (response.status === 200) {
-        console.log('Synthesis completed successfully, audio size:', response.arrayBuffer.byteLength);
-        return response.arrayBuffer;
-      }
-
-      const errorMsg = `Synthesis failed: ${response.status}`;
-      console.error(errorMsg, response);
-      throw new Error(errorMsg);
-    } catch (error) {
-      console.error('Error synthesizing speech:', error);
-      if (error instanceof Error && error.message.includes('500')) {
-        throw new Error('VOICEVOX Engine 500エラー。音声合成に失敗しました。');
-      }
-      throw error;
     }
+
+    return await this.request(
+      'POST',
+      `/synthesis?speaker=${this.speakerId}`,
+      { jsonBody: audioQuery, expect: 'arraybuffer' }
+    ) as ArrayBuffer;
   }
 
   /**
@@ -802,10 +888,16 @@ export class VOICEVOXEngine {
   }
 
   /**
-   * Set server URL
+   * Set server URL. A different server means different speakers/models, so the
+   * warm-up cache and HTTP strategy are reset.
    */
   setServerUrl(url: string) {
-    this.serverUrl = url;
+    if (url !== this.serverUrl) {
+      this.serverUrl = url;
+      this.initializedSpeakers.clear();
+      this.useNodeHttp = Platform.isDesktopApp;
+      this.useCancellableSynthesis = true;
+    }
   }
 
   /**

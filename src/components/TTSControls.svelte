@@ -12,7 +12,7 @@
   export let getTextFromCursor: () => string;
   export let scrollToReading: () => void;
 
-  let currentEngine: 'os' | 'voicevox' = settings?.ttsEngine === 'voicevox' ? 'voicevox' : 'os';
+  let currentEngine: 'os' | 'voicevox' | 'voicevox_nemo' = settings?.ttsEngine ?? 'os';
 
   async function handleEngineChange() {
     // Stop any playback before switching, then hand off to the plugin, which
@@ -33,14 +33,16 @@
   // requested until speak() has actually been kicked off.
   let isStarting = false;
 
-  // VOICEVOX support
+  // VOICEVOX support (covers both VOICEVOX and VOICEVOX Nemo)
+  const isNemo = settings?.ttsEngine === 'voicevox_nemo';
   let voicevoxSpeakers: Array<{id: number, name: string}> = [];
-  let selectedVoicevoxSpeakerId: number = settings?.voicevoxSpeakerId || 0;
-  let isVoicevoxMode: boolean = settings?.ttsEngine === 'voicevox';
+  let selectedVoicevoxSpeakerId: number =
+    (isNemo ? settings?.voicevoxNemoSpeakerId : settings?.voicevoxSpeakerId) || 0;
+  let isVoicevoxMode: boolean = settings?.ttsEngine !== 'os';
 
   onMount(async () => {
-    // Check if VOICEVOX is enabled
-    isVoicevoxMode = settings?.ttsEngine === 'voicevox';
+    // Check if a VOICEVOX-family engine is enabled
+    isVoicevoxMode = settings?.ttsEngine !== 'os';
 
     if (isVoicevoxMode) {
       // Load VOICEVOX speakers
@@ -89,8 +91,9 @@
         });
       });
 
-      // Set selected speaker from settings
-      selectedVoicevoxSpeakerId = settings?.voicevoxSpeakerId || 0;
+      // Set selected speaker from settings (per active engine)
+      selectedVoicevoxSpeakerId =
+        (isNemo ? settings?.voicevoxNemoSpeakerId : settings?.voicevoxSpeakerId) || 0;
     } catch (error) {
       console.error('Failed to load VOICEVOX speakers:', error);
       new Notice('VOICEVOX スピーカーの読み込みに失敗しました');
@@ -257,6 +260,7 @@
     >
       <option value="os">OS標準（Windows / Android）</option>
       <option value="voicevox">VOICEVOX</option>
+      <option value="voicevox_nemo">VOICEVOX Nemo</option>
     </select>
   </div>
 

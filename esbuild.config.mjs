@@ -18,6 +18,8 @@ esbuild.build({
     'path',
     'os',
     'util',
+    'http',
+    'https',
     '@codemirror/autocomplete',
     '@codemirror/collab',
     '@codemirror/commands',
