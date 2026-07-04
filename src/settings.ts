@@ -45,6 +45,7 @@ export interface VerticalReaderSettings {
   // Display settings
   defaultFont: string;
   scrollSensitivity: number;
+  openOnStartup: boolean; // 起動時に右サイドバーへ縦書きビューを開く
 }
 
 /**
@@ -79,7 +80,8 @@ export const DEFAULT_SETTINGS: VerticalReaderSettings = {
 
   // Display defaults
   defaultFont: 'serif',
-  scrollSensitivity: 2.0
+  scrollSensitivity: 2.0,
+  openOnStartup: true
 };
 
 /**
@@ -403,6 +405,17 @@ export class VerticalReaderSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           });
       });
+
+    // Open on startup
+    new Setting(containerEl)
+      .setName('起動時に自動で開く')
+      .setDesc('Obsidian起動時（プラグイン有効化時）に、縦書きビューを右サイドバーのタブとして自動で開きます。')
+      .addToggle(toggle => toggle
+        .setValue(this.plugin.settings.openOnStartup)
+        .onChange(async (value) => {
+          this.plugin.settings.openOnStartup = value;
+          await this.plugin.saveSettings();
+        }));
 
     // Scroll sensitivity
     new Setting(containerEl)

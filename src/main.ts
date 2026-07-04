@@ -146,6 +146,15 @@ export default class VerticalReaderPlugin extends Plugin {
         }
       })
     );
+
+    // Auto-open the reader as a right-sidebar tab so it's always one click
+    // away. onLayoutReady fires immediately if the layout is already ready
+    // (e.g. when the plugin is enabled/reloaded mid-session).
+    this.app.workspace.onLayoutReady(() => {
+      if (this.settings.openOnStartup) {
+        this.activateView();
+      }
+    });
   }
 
   onunload() {
