@@ -1,6 +1,6 @@
 {
   "name": "obsidian-vertical-reader-tts",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "description": "Obsidian plugin for vertical reading with ruby text and selectable TTS (OS-native / VOICEVOX)",
   "main": "main.js",
   "scripts": {

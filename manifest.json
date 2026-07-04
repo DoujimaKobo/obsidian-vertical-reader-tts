@@ -1,7 +1,7 @@
 {
   "id": "vertical-reader-tts",
   "name": "Vertical Reader with TTS",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "minAppVersion": "1.0.0",
   "description": "縦書きの推敲ビューとルビ表示、OS標準（Windows/Android）とVOICEVOXから選べる読み上げ機能を提供します。",
   "author": "DoujimaKobo",

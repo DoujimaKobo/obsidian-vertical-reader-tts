@@ -1,6 +1,13 @@
 import { App, MarkdownView, debounce, EventRef, TFile, TAbstractFile, Editor } from 'obsidian';
+import { get } from 'svelte/store';
 import type { VerticalReaderView } from '../views/VerticalReaderView';
 import { EDITOR_SYNC_DEBOUNCE_MS } from './Constants';
+import { ttsState } from '../tts/TTSState';
+
+// カーソル位置のポーリング間隔（ms）。
+// Obsidianには「カーソルが動いた」イベントが無い（editor-changeは内容編集時のみ）
+// ため、クリックや矢印キーでの移動を拾うにはポーリングが必要。
+const CURSOR_POLL_MS = 250;
 
 /**
  * Manages synchronization between the standard editor and vertical reader view
@@ -13,6 +20,8 @@ export class EditorSync {
   private debouncedCursorSync: (charOffset: number) => void;
   private isDestroyed: boolean = false;
   private eventRefs: EventRef[] = [];
+  private cursorPollId: number | null = null;
+  private lastCursorOffset: number = -1;
 
   constructor(app: App, view: VerticalReaderView) {
     this.app = app;
@@ -66,8 +75,34 @@ export class EditorSync {
       this.app.vault.on('modify', this.handleFileModify.bind(this))
     );
 
+    // Poll the caret position so clicks / arrow keys in the editor are
+    // reflected in the reader EVERY time (editor-change only fires on content
+    // edits, which is why cursor sync used to work "only once").
+    this.cursorPollId = window.setInterval(() => this.pollCursor(), CURSOR_POLL_MS);
+
     // Initial sync
     this.syncFromActiveEditor();
+  }
+
+  /**
+   * カーソル位置を監視し、変化していればリーダーを追従スクロールさせる。
+   * TTSが再生中（かつ一時停止でない）の間は、読み上げ追従スクロールと
+   * 取り合いにならないようスキップする。
+   */
+  private pollCursor() {
+    if (this.isDestroyed) return;
+
+    const tts = get(ttsState);
+    if (tts.isPlaying && !tts.isPaused) return;
+
+    const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!activeView?.editor) return;
+
+    const offset = activeView.editor.posToOffset(activeView.editor.getCursor());
+    if (offset !== this.lastCursorOffset) {
+      this.lastCursorOffset = offset;
+      this.view.scrollToCharOffset(offset);
+    }
   }
 
   /**
@@ -75,6 +110,11 @@ export class EditorSync {
    */
   stop() {
     this.isDestroyed = true;
+
+    if (this.cursorPollId !== null) {
+      window.clearInterval(this.cursorPollId);
+      this.cursorPollId = null;
+    }
 
     // Clean up event listeners
     this.eventRefs.forEach(ref => this.app.workspace.offref(ref));
@@ -102,6 +142,7 @@ export class EditorSync {
       // Sync cursor position
       const cursor = editor.getCursor();
       const charOffset = editor.posToOffset(cursor);
+      this.lastCursorOffset = charOffset;
       this.debouncedCursorSync(charOffset);
     }
   }
@@ -129,6 +170,7 @@ export class EditorSync {
       // Sync cursor position as well
       const cursor = activeView.editor.getCursor();
       const charOffset = activeView.editor.posToOffset(cursor);
+      this.lastCursorOffset = charOffset;
       this.view.scrollToCharOffset(charOffset);
     }
   }
