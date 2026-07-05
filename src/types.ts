@@ -2,14 +2,25 @@
  * Type definitions for the Vertical Reader plugin
  */
 
+/** Inline markdown styling flags for display (bold, italic, ...). */
+export interface InlineStyles {
+  bold?: boolean;
+  italic?: boolean;
+  strike?: boolean;
+  highlight?: boolean;
+  code?: boolean;
+  link?: boolean;
+}
+
 export interface RubySegment {
   type: 'text' | 'ruby';
   content: string;
   annotation?: string;
   markdown?: {
-    type: 'heading' | 'list-item' | 'normal';
+    type: 'heading' | 'list-item' | 'quote' | 'hr' | 'normal';
     level?: number; // For headings (1-6)
   };
+  styles?: InlineStyles;
 }
 
 export interface TTSStateData {

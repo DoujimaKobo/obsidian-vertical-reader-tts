@@ -1,4 +1,6 @@
-import type { RubySegment } from '../types';
+import type { RubySegment, InlineStyles } from '../types';
+
+type LineMarkdown = { type: 'heading' | 'list-item' | 'quote' | 'hr' | 'normal', level?: number };
 
 /**
  * Parser for Ruby text annotations using multiple syntax formats
@@ -78,11 +80,17 @@ export class RubyParser {
   /**
    * Detect markdown type from a line
    */
-  private static detectMarkdownType(line: string): { type: 'heading' | 'list-item' | 'normal', level?: number } {
+  private static detectMarkdownType(line: string): LineMarkdown {
     // Check for headings (##, ###, etc.)
     const headingMatch = line.match(/^(#{1,6})\s+/);
     if (headingMatch) {
       return { type: 'heading', level: headingMatch[1].length };
+    }
+
+    // Horizontal rule (---, ***, ___) — check BEFORE list items, since
+    // "***" would otherwise match the list pattern
+    if (/^([\-\*_])\1{2,}\s*$/.test(line.trim()) && line.trim().length > 0) {
+      return { type: 'hr' };
     }
 
     // Check for list items (-, *, +)
@@ -95,53 +103,95 @@ export class RubyParser {
       return { type: 'list-item' };
     }
 
+    // Blockquote (>)
+    if (/^>\s?/.test(line)) {
+      return { type: 'quote' };
+    }
+
     return { type: 'normal' };
   }
 
   /**
-   * Parse a single line with ruby annotations
+   * Inline-markdown tokenizer. Splits a line into runs of (text, styles)
+   * so the reader can show 太字 as bold instead of printing "**太字**".
+   * Alternatives are ordered: earlier ones win (e.g. *** before ** before *).
    */
-  private static parseLine(line: string, markdownInfo: { type: 'heading' | 'list-item' | 'normal', level?: number }): RubySegment[] {
-    const segments: RubySegment[] = [];
-    let lastIndex = 0;
+  private static readonly INLINE_PATTERN = new RegExp(
+    [
+      '(?<comment>%%.*?%%)',                        // %%コメント%% → 非表示
+      '(?<code>`[^`]+`)',                           // `code`
+      '(?<bolditalic>\\*\\*\\*[^*]+\\*\\*\\*)',     // ***太字斜体***
+      '(?<bold>\\*\\*[^*]+\\*\\*|__[^_]+__)',       // **太字** / __太字__
+      '(?<italic>\\*[^*\\s][^*]*\\*|_[^_\\s][^_]*_)', // *斜体* / _斜体_
+      '(?<strike>~~[^~]+~~)',                       // ~~打消し~~
+      '(?<hl>==[^=]+==)',                           // ==ハイライト==
+      '(?<embed>!\\[\\[[^\\]]+\\]\\])',             // ![[埋め込み]]
+      '(?<wikilink>\\[\\[[^\\]]+\\]\\])',           // [[リンク]] / [[リンク|表示名]]
+      '(?<mdlink>\\[[^\\]]+\\]\\([^)]+\\))',        // [表示名](url)
+    ].join('|'),
+    'g'
+  );
 
-    const matches = line.matchAll(this.RUBY_PATTERN);
+  /**
+   * Split a line into styled runs. Plain stretches get no styles.
+   */
+  private static tokenizeInline(line: string): Array<{ text: string; styles?: InlineStyles }> {
+    const runs: Array<{ text: string; styles?: InlineStyles }> = [];
+    let last = 0;
 
-    for (const match of matches) {
-      // Add plain text before ruby
-      if (match.index! > lastIndex) {
-        const plainText = line.slice(lastIndex, match.index);
-        if (plainText) {
-          segments.push({
-            type: 'text',
-            content: plainText,
-            markdown: markdownInfo
-          });
-        }
+    for (const m of line.matchAll(this.INLINE_PATTERN)) {
+      if (m.index! > last) {
+        runs.push({ text: line.slice(last, m.index) });
       }
-
-      // Add ruby segment(s)
-      const base = match[1];
-      const annotation = match[2];
-
-      const distributed = this.distributeAnnotation(base, annotation);
-      // Add markdown info to ruby segments
-      distributed.forEach(seg => seg.markdown = markdownInfo);
-      segments.push(...distributed);
-
-      lastIndex = match.index! + match[0].length;
+      const g = m.groups!;
+      if (g.comment) {
+        // drop comments entirely
+      } else if (g.code) {
+        runs.push({ text: g.code.slice(1, -1), styles: { code: true } });
+      } else if (g.bolditalic) {
+        runs.push({ text: g.bolditalic.slice(3, -3), styles: { bold: true, italic: true } });
+      } else if (g.bold) {
+        runs.push({ text: g.bold.slice(2, -2), styles: { bold: true } });
+      } else if (g.italic) {
+        runs.push({ text: g.italic.slice(1, -1), styles: { italic: true } });
+      } else if (g.strike) {
+        runs.push({ text: g.strike.slice(2, -2), styles: { strike: true } });
+      } else if (g.hl) {
+        runs.push({ text: g.hl.slice(2, -2), styles: { highlight: true } });
+      } else if (g.embed) {
+        // ![[file]] → ファイル名のみをリンク風に表示
+        const inner = g.embed.slice(3, -2);
+        const alias = inner.split('|')[1] ?? inner.split('|')[0];
+        runs.push({ text: alias, styles: { link: true } });
+      } else if (g.wikilink) {
+        // [[target|alias]] → alias（無ければ target）
+        const inner = g.wikilink.slice(2, -2);
+        const parts = inner.split('|');
+        runs.push({ text: parts[1] ?? parts[0], styles: { link: true } });
+      } else if (g.mdlink) {
+        // [text](url) → text
+        const text = g.mdlink.slice(1, g.mdlink.indexOf(']'));
+        runs.push({ text, styles: { link: true } });
+      }
+      last = m.index! + m[0].length;
     }
 
-    // Add remaining text
-    if (lastIndex < line.length) {
-      const remainingText = line.slice(lastIndex);
-      if (remainingText) {
-        segments.push({
-          type: 'text',
-          content: remainingText,
-          markdown: markdownInfo
-        });
-      }
+    if (last < line.length) {
+      runs.push({ text: line.slice(last) });
+    }
+
+    return runs;
+  }
+
+  /**
+   * Parse a single line: inline-markdown runs first, then ruby annotations
+   * inside each run (so ruby works inside 太字 etc.).
+   */
+  private static parseLine(line: string, markdownInfo: LineMarkdown): RubySegment[] {
+    const segments: RubySegment[] = [];
+
+    for (const run of this.tokenizeInline(line)) {
+      segments.push(...this.parseRubyRun(run.text, markdownInfo, run.styles));
     }
 
     // If line is empty but has markdown info (e.g., empty heading), add empty segment
@@ -151,6 +201,59 @@ export class RubyParser {
         content: '',
         markdown: markdownInfo
       });
+    }
+
+    return segments;
+  }
+
+  /**
+   * Parse ruby annotations within a styled run of text.
+   */
+  private static parseRubyRun(text: string, markdownInfo: LineMarkdown, styles?: InlineStyles): RubySegment[] {
+    const segments: RubySegment[] = [];
+    let lastIndex = 0;
+
+    const matches = text.matchAll(this.RUBY_PATTERN);
+
+    for (const match of matches) {
+      // Add plain text before ruby
+      if (match.index! > lastIndex) {
+        const plainText = text.slice(lastIndex, match.index);
+        if (plainText) {
+          segments.push({
+            type: 'text',
+            content: plainText,
+            markdown: markdownInfo,
+            styles
+          });
+        }
+      }
+
+      // Add ruby segment(s)
+      const base = match[1];
+      const annotation = match[2];
+
+      const distributed = this.distributeAnnotation(base, annotation);
+      distributed.forEach(seg => {
+        seg.markdown = markdownInfo;
+        seg.styles = styles;
+      });
+      segments.push(...distributed);
+
+      lastIndex = match.index! + match[0].length;
+    }
+
+    // Add remaining text
+    if (lastIndex < text.length) {
+      const remainingText = text.slice(lastIndex);
+      if (remainingText) {
+        segments.push({
+          type: 'text',
+          content: remainingText,
+          markdown: markdownInfo,
+          styles
+        });
+      }
     }
 
     return segments;

@@ -44,6 +44,18 @@ export class MarkdownCleaner {
     // Remove strikethrough
     text = text.replace(/~~(.*?)~~/g, '$1');
 
+    // Remove highlight ==text== → text
+    text = text.replace(/==(.*?)==/g, '$1');
+
+    // Remove Obsidian comments %%...%% entirely
+    text = text.replace(/%%[\s\S]*?%%/g, '');
+
+    // Remove Obsidian embeds ![[file]] entirely (nothing to read aloud)
+    text = text.replace(/!\[\[[^\]]+\]\]/g, '');
+
+    // Wikilinks with alias [[target|alias]] → alias (before the plain rule)
+    text = text.replace(/\[\[[^\]|]+\|([^\]]+)\]\]/g, '$1');
+
     // Remove links [text](url) → text
     text = text.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');
 

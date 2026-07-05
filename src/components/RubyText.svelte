@@ -9,19 +9,33 @@
     return text.split('\n').join('<br>');
   }
 
-  // Get CSS class based on markdown type
+  // Get CSS class based on markdown type + inline styles
   function getMarkdownClass(segment: RubySegment): string {
-    if (!segment.markdown) return '';
-
     const classes: string[] = [];
 
-    if (segment.markdown.type === 'heading') {
-      classes.push('markdown-heading');
-      if (segment.markdown.level) {
-        classes.push(`markdown-h${segment.markdown.level}`);
+    if (segment.markdown) {
+      if (segment.markdown.type === 'heading') {
+        classes.push('markdown-heading');
+        if (segment.markdown.level) {
+          classes.push(`markdown-h${segment.markdown.level}`);
+        }
+      } else if (segment.markdown.type === 'list-item') {
+        classes.push('markdown-list-item');
+      } else if (segment.markdown.type === 'quote') {
+        classes.push('markdown-quote');
+      } else if (segment.markdown.type === 'hr') {
+        classes.push('markdown-hr');
       }
-    } else if (segment.markdown.type === 'list-item') {
-      classes.push('markdown-list-item');
+    }
+
+    const s = segment.styles;
+    if (s) {
+      if (s.bold) classes.push('md-bold');
+      if (s.italic) classes.push('md-italic');
+      if (s.strike) classes.push('md-strike');
+      if (s.highlight) classes.push('md-highlight');
+      if (s.code) classes.push('md-code');
+      if (s.link) classes.push('md-link');
     }
 
     return classes.join(' ');
@@ -44,6 +58,11 @@
       cleaned = cleaned.replace(/^\d+\.\s+/, '');
     }
 
+    // Remove blockquote marker (>)
+    if (markdown.type === 'quote') {
+      cleaned = cleaned.replace(/^>\s?/, '');
+    }
+
     return cleaned;
   }
 </script>
@@ -55,6 +74,9 @@
       <rt>{segment.annotation}</rt>
     {/if}
   </ruby>
+{:else if segment.markdown?.type === 'hr'}
+  <!-- 水平線は小説の節区切り「＊」として表示 -->
+  <span data-segment-index={index} class="markdown-hr">＊</span>
 {:else}
   <span data-segment-index={index} class={getMarkdownClass(segment)}>{@html preserveLineBreaks(cleanMarkdownSymbols(segment.content, segment.markdown))}</span>
 {/if}
@@ -129,5 +151,53 @@
     content: '・';
     color: var(--text-muted);
     margin-right: 4px;
+  }
+
+  /* Blockquote: muted with a rule on the reading-start side (top in vertical-rl) */
+  .markdown-quote {
+    color: var(--text-muted);
+    border-top: 2px solid var(--background-modifier-border);
+    padding-top: 6px;
+  }
+
+  /* Horizontal rule → scene-break marker */
+  .markdown-hr {
+    display: inline-block;
+    color: var(--text-muted);
+    letter-spacing: 0.5em;
+    margin: 0 0.8em;
+  }
+
+  /* Inline markdown styles */
+  .md-bold {
+    font-weight: 700;
+  }
+
+  .md-italic {
+    font-style: italic;
+  }
+
+  .md-strike {
+    text-decoration: line-through;
+  }
+
+  .md-highlight {
+    background-color: var(--text-highlight-bg, rgba(255, 208, 0, 0.4));
+    border-radius: 2px;
+  }
+
+  .md-code {
+    font-family: var(--font-monospace, monospace);
+    background-color: var(--background-primary-alt);
+    border-radius: 3px;
+    padding: 1px 2px;
+    font-size: 0.9em;
+  }
+
+  .md-link {
+    color: var(--text-accent);
+    text-decoration: underline;
+    text-decoration-color: var(--text-accent);
+    text-underline-offset: 2px;
   }
 </style>
